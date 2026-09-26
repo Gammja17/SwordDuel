@@ -1,92 +1,100 @@
 extends CharacterBody3D
-## A reactive AI duelist.
+## A reactive AI duelist with a longsword.
 ##
-## Loop: hold an upright guard at guard distance (just outside the player's resting
-## reach), then step in with a telegraphed windup, swing, and step back out to recover.
-## Against it the player can:
-##   - PARRY: swing into its attack       -> it staggers, wide open
+## Loop: hold a guard at guard distance (just outside the player's resting reach),
+## then step in with a telegraphed windup, cut along one of its lines, and step back
+## out. How it fights is set by a tier (see main.gd): windup/attack speed, which lines
+## it knows, how often it feints, chains a second cut, or punishes the player for
+## stepping into range. Against it the player can:
+##   - PARRY: swing into the attack       -> it staggers, wide open
 ##   - BLOCK: just hold the blade in line -> no damage, but it keeps the pressure on
-##   - back off during the windup         -> the swing falls short
-##   - beat the guard: it only covers the high line on the side of your blade, so go
-##     low, switch sides faster than it follows, or bind and push through
+##   - back off during the windup         -> the cut falls short
+##   - beat the guard: it covers the high line on the side of your blade; go low,
+##     switch sides faster than it follows, or bind and push through
 
-enum State { APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER }
+signal died
 
-const SPEED := 2.6
+enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
+
+const KnightScript := preload("res://knight.gd")
+const Armor := preload("res://armor.gd")
+const SwordMesh := preload("res://sword_mesh.gd")
+const Fx := preload("res://fx.gd")
+
 const GRAVITY := 18.0
-const POISE_RANGE := 1.55    # hold the guard here: just outside the player's resting reach
-const ATTACK_RANGE := 1.15   # step in to here during the windup, then swing
-const REACH := 0.9
-
-const HAND_LOCAL := Vector3(0.22, 1.10, -0.10)
-const NEUTRAL := Vector3(0.0, 1.20, -0.75)
-# Cocked / follow-through poses for the two attack lines (local space, -Z faces player).
-const COCK_R := Vector3(0.65, 1.75, -0.15)
-const SWING_R := Vector3(-0.45, 0.80, -0.90)
-const COCK_L := Vector3(-0.65, 1.75, -0.15)
-const SWING_L := Vector3(0.45, 0.80, -0.90)
-
-const WINDUP_TIME := 0.40
-const ATTACK_TIME := 0.22
-const RECOVER_TIME := 0.55
-const STAGGER_TIME := 0.90
+const POISE_RANGE := 2.0     # hold the guard here: just outside the player's resting reach
+const ATTACK_RANGE := 1.5    # step in to here during the windup, then cut
+const REACH := SwordMesh.REACH
 const BLOCKED_FOLLOWUP := 0.25   # after being blocked (not parried), attack again this soon
+const STEP_IN_SPEED := 3.0
+const STEP_OUT_SPEED := 2.4
+
+# Poses are [grip, blade direction] in local space, -Z toward the player, right-side
+# versions; the left side mirrors X. Each cut is [cocked, impact, follow-through]. At
+# impact the blade is still on its own side — a cut from its right lands on the
+# player's LEFT shoulder before it ever crosses the middle — so the player has to read
+# the side to parry it; swinging the wrong way lets it through.
+const NEUTRAL := [Vector3(0.22, 1.50, -0.12), Vector3(0.25, 1.0, 0.30)]  # blade up over the shoulder
+const LINES := {
+	"diag": [    # high diagonal cut onto the shoulder, then down across the body
+		[Vector3(0.30, 1.55, -0.08), Vector3(0.45, 0.85, 0.35)],
+		[Vector3(0.20, 1.48, -0.42), Vector3(0.06, -0.03, -1.0)],
+		[Vector3(-0.14, 1.05, -0.40), Vector3(-0.72, -0.55, -0.42)],
+	],
+	"horiz": [   # level cut into the side at chest height
+		[Vector3(0.34, 1.36, -0.05), Vector3(0.92, 0.12, 0.38)],
+		[Vector3(0.24, 1.32, -0.42), Vector3(0.08, -0.02, -1.0)],
+		[Vector3(-0.24, 1.30, -0.34), Vector3(-0.92, 0.0, -0.38)],
+	],
+	"thrust": [  # draw back, then drive the point straight in
+		[Vector3(0.10, 1.28, 0.06), Vector3(0.04, 0.12, -1.0)],
+		[Vector3(0.06, 1.31, -0.26), Vector3(0.02, 0.08, -1.0)],
+		[Vector3(0.02, 1.34, -0.58), Vector3(0.0, 0.05, -1.0)],
+	],
+}
 
 var hp := 100.0
+var max_hp := 100.0
+var display_name := ""
 
+var _t := {}          # tier parameters
 var _player: Node3D
-var _sword  # player's Sword (untyped for dynamic get_tip_pos)
+var _sword            # the player's Sword (untyped: read dynamically)
 
-var _state: int = State.APPROACH
+var _state: int = State.IDLE
 var _timer := 0.0
-var _from_right := true
+var _kind := "diag"
+var _side := 1.0
+var _windup_total := 0.0
+var _feint_planned := false
+var _feinted := false
+var _in_combo := false
 var _attack_hit := false
+var _entry_checked := false
+var _since_flinch := 99.0
+var _push := Vector3.ZERO
 
-var _holder: Node3D
-var _area: Area3D
-var _cur := Vector3.ZERO
-var _has_cur := false
+var _knight
+var _grip := Vector3(0.22, 1.50, -0.12)
+var _dir := Vector3(0.25, 1.0, 0.30).normalized()
+var _edge := Vector3.RIGHT
+var _path: Array = []
+var _tip_local_prev := Vector3.ZERO
+var _has_blade := false
+var _step_dist := 0.0
 
-var _btip := Vector3.ZERO
-var _btip_prev := Vector3.ZERO
-var _btip_vel := Vector3.ZERO
-var _has_btip := false
-
-var _mat: StandardMaterial3D
-var _base_color := Color(0.62, 0.30, 0.30)
-var _flash := 0.0
-var _blade_mat: StandardMaterial3D
-var _blade_base := Color(0.80, 0.82, 0.88)
-var _blade_flash := 0.0
-
-
-func setup(player: Node3D) -> void:
-	_player = player
-	_sword = player.sword
-
-
-func get_blade_vel() -> Vector3:
-	return _btip_vel
-
-
-func is_attacking() -> bool:
-	return _state == State.WINDUP or _state == State.ATTACK
+# Blade state read by combat.gd, world space: the edge runs from base (front of the
+# crossguard) to tip; prev_* are last frame's positions.
+var blade_base := Vector3.ZERO
+var blade_tip := Vector3.ZERO
+var blade_prev_base := Vector3.ZERO
+var blade_prev_tip := Vector3.ZERO
+var blade_tip_vel := Vector3.ZERO
 
 
 func _ready() -> void:
 	collision_layer = 4       # opponent hurtbox — the player's blade looks for this
-	collision_mask = 1 | 2    # floor (1) + player body (2)
-
-	var mesh := MeshInstance3D.new()
-	var caps := CapsuleMesh.new()
-	caps.radius = 0.32
-	caps.height = 1.70
-	mesh.mesh = caps
-	mesh.position = Vector3(0.0, 0.85, 0.0)
-	_mat = StandardMaterial3D.new()
-	_mat.albedo_color = _base_color
-	mesh.material_override = _mat
-	add_child(mesh)
+	collision_mask = 1 | 2    # arena (1) + player body (2)
 
 	var col := CollisionShape3D.new()
 	var cs := CapsuleShape3D.new()
@@ -96,74 +104,128 @@ func _ready() -> void:
 	col.position = Vector3(0.0, 0.85, 0.0)
 	add_child(col)
 
-	_holder = Node3D.new()
-	_holder.name = "BladeHolder"
-	add_child(_holder)
-
-	var blade := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.035, 0.035, REACH)
-	blade.mesh = bm
-	blade.position = Vector3(0.0, 0.0, -REACH * 0.5)
-	_blade_mat = StandardMaterial3D.new()
-	_blade_mat.albedo_color = _blade_base
-	_blade_mat.metallic = 0.8
-	_blade_mat.roughness = 0.25
-	blade.material_override = _blade_mat
-	_holder.add_child(blade)
-
-	_area = Area3D.new()
-	_area.collision_layer = 8      # blade
-	_area.collision_mask = 2 | 8   # player body (2) to cut + blades (8) to be blocked by
-	var acol := CollisionShape3D.new()
-	var abox := BoxShape3D.new()
-	abox.size = Vector3(0.10, 0.10, REACH)
-	acol.shape = abox
-	acol.position = Vector3(0.0, 0.0, -REACH * 0.5)
-	_area.add_child(acol)
-	_holder.add_child(_area)
+	_knight = KnightScript.new()
+	add_child(_knight)
 
 
+func setup(player: Node3D, tier: Dictionary) -> void:
+	_player = player
+	_sword = player.sword if player != null else null
+	_t = tier
+	max_hp = float(tier.get("hp", 100.0))
+	hp = max_hp
+	display_name = String(tier.get("name", ""))
+	_knight.build(tier.get("tabard", Color(0.3, 0.3, 0.45)), bool(tier.get("crest", false)))
+	_update_blade(0.0)
+
+
+## Starts fighting (main calls this when the duel begins).
+func begin() -> void:
+	_enter(State.APPROACH)
+
+
+func get_blade_vel() -> Vector3:
+	return blade_tip_vel
+
+
+## Winding up, or mid-cut and not yet landed (after landing, the follow-through that
+## runs into the player's blade is not a blow they blocked).
+func is_attacking() -> bool:
+	return _state == State.WINDUP or (_state == State.ATTACK and not _attack_hit)
+
+
+## Mid-cut and not yet landed: a blow the player can block (a windup can only be
+## parried or bumped).
+func is_striking() -> bool:
+	return _state == State.ATTACK and not _attack_hit
+
+
+## combat.gd: our cut may land this frame.
+func can_cut() -> bool:
+	return is_striking()
+
+
+## combat.gd: our cut reached the player.
+func land_cut(target: Node, point: Vector3) -> void:
+	_attack_hit = true
+	target.receive_cut(blade_tip_vel.length() * float(_t.get("damage", 1.0)), point, blade_tip_vel.normalized())
+
+
+func is_dead() -> bool:
+	return _state == State.DEAD
+
+
+## A cut from the player's sword landed.
 func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
-	hp = maxf(hp - clampf(strength * 3.0, 8.0, 45.0), 0.0)
-	_flash = 1.0
-	_spawn_cut_mark(pos, swing_dir, strength)
-
-
-## Our blade met the player's. If we were attacking: a parry staggers us, a plain
-## block only stops this swing and we come again quickly.
-func on_blade_clashed(_pos: Vector3, parried: bool) -> void:
-	_blade_flash = 1.0
-	if not is_attacking():
+	if _state == State.DEAD:
 		return
-	if parried:
+	hp = maxf(hp - clampf(strength * 2.4, 6.0, 34.0), 0.0)
+	_knight.flash()
+	Fx.cut_spray(get_tree().current_scene, pos, swing_dir)
+	Sfx.play("cut", pos, 0.0)
+	Sfx.play("hurt", pos, -5.0)
+	if hp <= 0.0:
+		_die()
+		return
+	# A short flinch if it wasn't mid-attack; not again right away, so no stun-lock.
+	if not is_attacking() and _state != State.STAGGER and _since_flinch > 1.2:
+		_since_flinch = 0.0
 		_enter(State.STAGGER)
-	else:
+		_timer = 0.3
+
+
+## Our blade met the player's.
+##   - they swung into our cut or windup (parry): we stagger, wide open
+##   - they only held the line against our cut (block): we come again quickly
+##   - they cut into our guard: some fighters answer at once (riposte)
+func on_blade_clashed(_pos: Vector3, parried: bool) -> void:
+	if parried:
+		_in_combo = false
+		_enter(State.STAGGER)
+		_push = global_transform.basis.z * 1.6   # knocked back a step
+	elif is_striking():
+		_in_combo = false
 		_enter(State.POISE)
 		_timer = BLOCKED_FOLLOWUP
+	elif not is_attacking() and _state != State.STAGGER:
+		if randf() < float(_t.get("riposte", 0.0)):
+			_start_windup(0.6, 0.0)
 
 
 func guard_broken() -> void:
+	if _state == State.DEAD:
+		return
 	_enter(State.STAGGER)
-	_flash = 1.0
+	_knight.flash()
 
 
 func _physics_process(delta: float) -> void:
-	if _flash > 0.0:
-		_flash = maxf(_flash - delta * 3.0, 0.0)
-		_mat.albedo_color = _base_color.lerp(Color(1.0, 0.85, 0.20), _flash)
-	if _blade_flash > 0.0:
-		_blade_flash = maxf(_blade_flash - delta * 4.0, 0.0)
-		_blade_mat.albedo_color = _blade_base.lerp(Color(1.0, 1.0, 0.85), _blade_flash)
-
-	if _player == null:
-		velocity = Vector3.ZERO
+	_since_flinch += delta
+	if _state == State.DEAD:
+		velocity = Vector3(0.0, velocity.y - GRAVITY * delta, 0.0)
 		move_and_slide()
+		return
+	if _player == null:
+		_update_blade(delta)
+		_knight.update_body(delta, 0.0)
 		return
 
 	_face_player()
 	_run_state(delta)
-	_apply_gravity_and_move(delta)
+	velocity += _push
+	_push = _push.move_toward(Vector3.ZERO, 6.0 * delta)
+	if is_on_floor():
+		velocity.y = 0.0
+	else:
+		velocity.y -= GRAVITY * delta
+	move_and_slide()
+
+	var moving := Vector2(velocity.x, velocity.z).length()
+	_knight.update_body(delta, moving)
+	_step_dist += moving * delta
+	if _step_dist > 0.75:
+		_step_dist = 0.0
+		Sfx.play("step", global_position, -9.0)
 	_update_blade(delta)
 
 
@@ -177,47 +239,65 @@ func _face_player() -> void:
 func _run_state(delta: float) -> void:
 	_timer -= delta
 	var dist := _horizontal_dist(_player.global_position)
+	velocity.x = 0.0
+	velocity.z = 0.0
+	if not _player.get("alive"):
+		_state = State.IDLE  # won: stand down, blade raised
+		return
 
 	match _state:
+		State.IDLE:
+			pass
 		State.APPROACH:
 			if dist > POISE_RANGE:
-				_move_toward_player()
+				_move(float(_t.get("speed", 2.4)))
 			else:
 				_enter(State.POISE)
 		State.POISE:
-			_stand()
-			if dist > POISE_RANGE + 0.4:
+			if dist > POISE_RANGE + 0.35:
 				_enter(State.APPROACH)
-			elif _timer <= 0.0:
-				if randf() < 0.7:
-					_from_right = randf() < 0.5
-					_enter(State.WINDUP)
+			elif dist < ATTACK_RANGE + 0.15:
+				# The player stepped into range: some fighters strike first.
+				if not _entry_checked:
+					_entry_checked = true
+					if randf() < float(_t.get("punish", 0.0)):
+						_start_windup(0.75, 0.0)
+			else:
+				_entry_checked = false
+			# Too close to be comfortable (e.g. right after a blocked cut): ease back out.
+			if _state == State.POISE and dist < POISE_RANGE - 0.3 and _timer > BLOCKED_FOLLOWUP:
+				_move(-STEP_OUT_SPEED * 0.6)
+			if _state == State.POISE and _timer <= 0.0:
+				if randf() < float(_t.get("attack_prob", 0.7)):
+					_start_windup(1.0, 0.0)
 				else:
 					_timer = randf_range(0.4, 0.9)
 		State.WINDUP:
-			# Step in while cocking the blade: the advance is part of the telegraph.
-			if dist > ATTACK_RANGE:
-				_move_toward_player()
-			else:
-				_stand()
+			# Step in during the first part of the windup, then plant the feet for the
+			# cut — so backing off at the right moment makes it fall short.
+			if dist > ATTACK_RANGE and _timer > _windup_total * 0.4:
+				_move(STEP_IN_SPEED)
+			if _feint_planned and not _feinted and _timer < _windup_total * 0.45:
+				# Feint: switch to the other side, which costs a moment.
+				_feinted = true
+				_side = -_side
+				_timer += 0.2
 			if _timer <= 0.0:
-				_attack_hit = false
-				_enter(State.ATTACK)
+				_start_attack()
 		State.ATTACK:
-			_stand()
-			_try_hit_player()
 			if _timer <= 0.0:
-				_enter(State.RECOVER)
+				if not _in_combo and randf() < float(_t.get("combo", 0.0)):
+					_in_combo = true
+					_start_windup(0.55, -_side)
+				else:
+					_in_combo = false
+					_enter(State.RECOVER)
 		State.RECOVER:
-			# Drift back out to guard distance.
 			if dist < POISE_RANGE:
-				_move_away_from_player()
-			else:
-				_stand()
+				_move(-STEP_OUT_SPEED)
 			if _timer <= 0.0:
 				_enter(State.POISE)
 		State.STAGGER:
-			_stand()
 			if _timer <= 0.0:
 				_enter(State.POISE)
 
@@ -226,118 +306,144 @@ func _enter(state: int) -> void:
 	_state = state
 	match state:
 		State.POISE:
-			_timer = randf_range(0.5, 1.1)
-		State.WINDUP:
-			_timer = WINDUP_TIME
+			var p: Vector2 = _t.get("poise", Vector2(0.6, 1.2))
+			_timer = randf_range(p.x, p.y)
 		State.ATTACK:
-			_timer = ATTACK_TIME
+			_timer = float(_t.get("attack", 0.22))
 		State.RECOVER:
-			_timer = RECOVER_TIME
+			_timer = float(_t.get("recover", 0.55))
 		State.STAGGER:
-			_timer = STAGGER_TIME
+			_timer = float(_t.get("stagger", 0.9))
 
 
-func _move_toward_player() -> void:
-	var dir := _player.global_position - global_position
-	dir.y = 0.0
-	dir = dir.normalized()
-	velocity.x = dir.x * SPEED
-	velocity.z = dir.z * SPEED
+## side = 0 picks a random side; otherwise forces it (combos come from the other side).
+func _start_windup(scale: float, side: float) -> void:
+	var lines: Array = _t.get("lines", ["diag"])
+	_kind = lines[randi() % lines.size()]
+	_side = side if side != 0.0 else (1.0 if randf() < 0.5 else -1.0)
+	_windup_total = float(_t.get("windup", 0.4)) * scale
+	_feint_planned = side == 0.0 and _kind != "thrust" and randf() < float(_t.get("feint", 0.0))
+	_feinted = false
+	_state = State.WINDUP
+	_timer = _windup_total
 
 
-func _move_away_from_player() -> void:
-	var dir := global_position - _player.global_position
-	dir.y = 0.0
-	dir = dir.normalized()
-	velocity.x = dir.x * SPEED
-	velocity.z = dir.z * SPEED
+func _start_attack() -> void:
+	var line: Array = LINES[_kind]
+	_path = [[_grip, _dir], _pose_of(line[1], _side), _pose_of(line[2], _side)]
+	_attack_hit = false
+	_enter(State.ATTACK)
+	Sfx.play("swing", blade_tip, 0.0)
 
 
-func _stand() -> void:
-	velocity.x = 0.0
-	velocity.z = 0.0
+func _move(speed: float) -> void:
+	var d := _player.global_position - global_position
+	d.y = 0.0
+	d = d.normalized() * speed
+	velocity.x = d.x
+	velocity.z = d.z
 
 
-func _apply_gravity_and_move(delta: float) -> void:
-	if is_on_floor():
-		velocity.y = 0.0
-	else:
-		velocity.y -= GRAVITY * delta
-	move_and_slide()
+# --- blade posing ------------------------------------------------------------------
+
+func _pose_of(p: Array, side: float) -> Array:
+	var g: Vector3 = p[0]
+	var d: Vector3 = p[1]
+	return [Vector3(g.x * side, g.y, g.z), Vector3(d.x * side, d.y, d.z).normalized()]
 
 
-# --- blade posing ---
-func _update_blade(delta: float) -> void:
-	var hand := to_global(HAND_LOCAL)
-	var target := _blade_target()
-	if not _has_cur:
-		_cur = target
-		_has_cur = true
-	else:
-		_cur = _cur.lerp(target, clampf(_lerp_rate() * delta, 0.0, 1.0))
-	_place_blade(hand, _cur)
-
-	var tip := _holder.global_transform * Vector3(0.0, 0.0, -REACH)
-	if _has_btip:
-		_btip_vel = (tip - _btip_prev) / maxf(delta, 0.0001)
-	_btip_prev = tip
-	_btip = tip
-	_has_btip = true
-
-
-func _blade_target() -> Vector3:
+func _target_pose() -> Array:
 	match _state:
 		State.WINDUP:
-			return to_global(COCK_R if _from_right else COCK_L)
-		State.ATTACK:
-			return to_global(SWING_R if _from_right else SWING_L)
+			var line: Array = LINES[_kind]
+			return _pose_of(line[0], _side)
 		State.STAGGER:
-			return to_global(Vector3(0.8 if _from_right else -0.8, 0.9, -0.2))
-		State.APPROACH, State.RECOVER:
-			return to_global(NEUTRAL)
+			return [Vector3(0.28 * _side, 1.10, -0.12), Vector3(0.95 * _side, -0.25, 0.15).normalized()]
+		State.POISE, State.RECOVER:
+			# Upright guard in front of the body, leaning toward the side of the player's
+			# blade: a barrier over the high line, not a probe that reaches out to it.
+			var s := 0.0
+			if _sword != null:
+				s = clampf(to_local(_sword.get_tip_pos()).x / 0.5, -1.0, 1.0)
+			return [Vector3(0.08 + 0.16 * s, 1.00, -0.34), Vector3(0.28 * s, 1.0, -0.12).normalized()]
 		_:
-			# POISE: blade upright in front of the body, leaning toward the side of the
-			# player's blade — a barrier over the high line, not a probe that reaches
-			# out to touch their blade.
-			var threat := to_local(_sword.get_tip_pos())
-			return to_global(Vector3(clampf(threat.x, -0.5, 0.5), 1.95, -0.35))
+			return _pose_of(NEUTRAL, 1.0)
+
+
+func _attack_pose() -> Array:
+	var t := clampf(1.0 - _timer / float(_t.get("attack", 0.22)), 0.0, 1.0)
+	var e := t * t * (3.0 - 2.0 * t)
+	var a: Array = _path[0] if e < 0.5 else _path[1]
+	var b: Array = _path[1] if e < 0.5 else _path[2]
+	var u := e * 2.0 if e < 0.5 else e * 2.0 - 1.0
+	var ga: Vector3 = a[0]
+	var gb: Vector3 = b[0]
+	return [ga.lerp(gb, u), _turn(a[1], b[1], u)]
 
 
 func _lerp_rate() -> float:
 	match _state:
-		State.ATTACK:
-			return 22.0
 		State.WINDUP:
 			return 9.0
 		State.POISE:
-			return 6.0
+			return float(_t.get("guard_track", 6.0))
+		State.RECOVER:
+			# Bringing the guard back up after a cut: the brief window to punish.
+			return float(_t.get("guard_track", 6.0)) * 0.55
 		State.STAGGER:
 			return 7.0
 		_:
 			return 5.0
 
 
-func _place_blade(hand: Vector3, point: Vector3) -> void:
-	var dir := point - hand
-	if dir.length() < 0.001:
-		dir = -global_transform.basis.z
-	dir = dir.normalized()
-	var t := Transform3D()
-	t.origin = hand
-	t.basis = _basis_pointing_along(dir)
-	_holder.global_transform = t
+func _update_blade(delta: float) -> void:
+	if _state == State.ATTACK and _path.size() == 3:
+		var pose := _attack_pose()
+		_grip = pose[0]
+		_dir = pose[1]
+	else:
+		var target := _target_pose()
+		var k := clampf(_lerp_rate() * delta, 0.0, 1.0) if delta > 0.0 else 1.0
+		_grip = _grip.lerp(target[0], k)
+		_dir = _turn(_dir, target[1], k)
+
+	var tip_local := _grip + _dir * REACH
+	var swing := tip_local - _tip_local_prev
+	if swing.length() > 0.002:
+		_edge = _edge.lerp(swing.normalized(), 0.35).normalized()
+	_tip_local_prev = tip_local
+
+	var blade_basis := Armor.blade_basis(_dir, _edge)
+	_knight.pose_arms(_grip, blade_basis)
+
+	var new_tip := to_global(tip_local)
+	var new_base := to_global(_grip + _dir * SwordMesh.BLADE_START)
+	if _has_blade and delta > 0.0:
+		blade_tip_vel = (new_tip - blade_tip) / delta
+		blade_prev_base = blade_base
+		blade_prev_tip = blade_tip
+	else:
+		blade_prev_base = new_base
+		blade_prev_tip = new_tip
+	blade_base = new_base
+	blade_tip = new_tip
+	_has_blade = true
 
 
-func _try_hit_player() -> void:
-	if _attack_hit:
-		return
-	if not _area.get_overlapping_areas().is_empty():
-		return  # a blade is in the way — blocked
-	for b in _area.get_overlapping_bodies():
-		if b == _player and b.has_method("receive_cut"):
-			b.receive_cut(_btip_vel.length(), _btip, _btip_vel.normalized())
-			_attack_hit = true
-			return
+## Rotate direction a toward b by weight k (safe when they point opposite ways).
+func _turn(a: Vector3, b: Vector3, k: float) -> Vector3:
+	var r := a.slerp(b, k)
+	if r.length() < 0.01:
+		return b
+	return r.normalized()
+
+
+func _die() -> void:
+	_state = State.DEAD
+	collision_layer = 0
+	_knight.collapse()
+	Sfx.play("block", global_position + Vector3(0, 0.3, 0), -2.0)
+	died.emit()
 
 
 func _horizontal_dist(p: Vector3) -> float:
@@ -345,33 +451,3 @@ func _horizontal_dist(p: Vector3) -> float:
 	a.y = 0.0
 	p.y = 0.0
 	return a.distance_to(p)
-
-
-func _spawn_cut_mark(pos: Vector3, swing_dir: Vector3, strength: float) -> void:
-	var mark := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	var length := clampf(0.18 + strength * 0.03, 0.18, 0.75)
-	bm.size = Vector3(0.02, 0.02, length)
-	mark.mesh = bm
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.90, 0.10, 0.10)
-	m.emission_enabled = true
-	m.emission = Color(1.0, 0.20, 0.20)
-	m.emission_energy_multiplier = 2.5
-	mark.material_override = m
-	add_child(mark)
-	if swing_dir.length() > 0.01:
-		mark.global_transform = Transform3D(_basis_pointing_along(swing_dir), pos)
-	else:
-		mark.global_position = pos
-	get_tree().create_timer(2.0).timeout.connect(mark.queue_free)
-
-
-func _basis_pointing_along(dir: Vector3) -> Basis:
-	var z := -dir
-	var up := Vector3.UP
-	if absf(z.dot(up)) > 0.99:
-		up = Vector3.RIGHT
-	var x := up.cross(z).normalized()
-	var y := z.cross(x).normalized()
-	return Basis(x, y, z)
