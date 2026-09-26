@@ -1,0 +1,72 @@
+# main 에 올릴 때마다 웹판을 내보내 GitHub Pages 에 올린다. (DragoniaGodot 과 같은 방식)
+# 내보내기 틀(export templates)은 GitHub 서버에서만 받는다 (웹 틀만 꺼내 쓰고, 다음부터는 캐시).
+# 스레드 없는 웹판이라 Pages 처럼 특별한 헤더(COOP/COEP)를 못 거는 곳에서도 돈다.
+name: 웹판 내보내기 · Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Godot · 웹 내보내기 틀 캐시
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-web
+
+      - name: Godot 받기
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          base=https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable
+          mkdir -p ~/godot && cd ~/godot
+          wget -q $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip && rm Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          wget -q $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p $dest
+          unzip -q -j Godot_v${GODOT_VERSION}-stable_export_templates.tpz 'templates/version.txt' 'templates/web_*' -d $dest
+          rm Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          ls $dest
+
+      - name: 내보내기
+        run: |
+          godot=~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
+          mkdir -p builds/web
+          $godot --headless --import
+          $godot --headless --export-release "Web" builds/web/index.html
+          ls -la builds/web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: builds/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
