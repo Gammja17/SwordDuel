@@ -29,7 +29,7 @@ const TIERS := [
 		"name": "수련기사 도윤",
 		"about": "기사단에 들어온 지 한 해 된 수련기사입니다. 동작이 크고 느려서 칼을 치켜드는 게 잘 보입니다.",
 		"hp": 70.0, "windup": 0.55, "attack": 0.26, "recover": 0.7, "stagger": 0.85,
-		"poise": Vector2(1.0, 1.8), "attack_prob": 0.6, "lines": ["a"], "dodge": 0.0, "parry_window": 0.25, "windup_jitter": 0.0,
+		"poise": Vector2(1.0, 1.8), "attack_prob": 0.6, "lines": ["c"], "dodge": 0.0, "parry_window": 0.25, "windup_jitter": 0.0,
 		"feint": 0.0, "combo": 0.0, "punish": 0.15, "riposte": 0.0, "damage": 0.5,
 		"armor": 0.5, "flinch_speed": 6.0,
 		"parry": 0.1, "bind_press": 0.25, "bind_strength": 0.5, "bind_switch": Vector2(2.2, 3.2), "exit_cut": 0.2,
@@ -53,7 +53,7 @@ const TIERS := [
 		"name": "검술사범 무진",
 		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 찌르기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
 		"hp": 120.0, "windup": 0.36, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
-		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "thrust", "lunge"], "dodge": 0.25, "parry_window": 0.14, "windup_jitter": 0.3,
+		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "lunge"], "dodge": 0.25, "parry_window": 0.14, "windup_jitter": 0.3,
 		"feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5, "damage": 0.85,
 		"armor": 3.0, "flinch_speed": 11.0,
 		"parry": 0.55, "bind_press": 0.5, "bind_strength": 0.8, "bind_switch": Vector2(1.3, 2.2), "exit_cut": 0.7,
@@ -65,7 +65,7 @@ const TIERS := [
 # The squire as a patient sparring partner: slow, harmless, never parries or feints.
 const PRACTICE_TIER := {
 	"name": "수련기사 도윤", "hp": 99999.0, "windup": 0.9, "attack": 0.34, "recover": 0.9, "stagger": 0.9,
-	"poise": Vector2(1.2, 1.8), "attack_prob": 1.0, "lines": ["a"], "parry_window": 0.3,
+	"poise": Vector2(1.2, 1.8), "attack_prob": 1.0, "lines": ["c"], "parry_window": 0.3,
 	"feint": 0.0, "combo": 0.0, "punish": 0.0, "riposte": 0.0, "damage": 0.0,
 	"armor": 0.0, "flinch_speed": 3.0,
 	"parry": 0.0, "bind_press": 0.0, "bind_strength": 0.4, "bind_switch": Vector2(1.8, 2.6), "exit_cut": 0.0,
@@ -213,7 +213,7 @@ func _to_title() -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	_hud.show_card("1대1 검술 결투", "진검승부",
-		"마우스로 칼을 휘둘러 싸웁니다.\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 회피, 우클릭 막기와 쳐내기\n세 사람을 차례로 이기면 끝납니다.",
+		"마우스로 칼을 휘둘러 싸웁니다.\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 회피, 우클릭 막기와 쳐내기\n휠 클릭 락온 켜고 끄기\n세 사람을 차례로 이기면 끝납니다.",
 		"클릭하면 시작합니다\nP를 누르면 연습을 다시 합니다" if _practice_done else "클릭하면 연습부터 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
@@ -329,6 +329,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.sword.cut_registered.connect(_on_cut)
 	_player.sword.clash_registered.connect(_on_clash)
 	_player.hurt.connect(_on_player_hurt)
+	_player.lock_changed.connect(_on_lock_changed)
 	_player.died.connect(_on_player_died)
 	_opponent.died.connect(_on_opponent_died)
 	_opponent.attack_whiffed.connect(_on_attack_whiffed)
@@ -478,6 +479,10 @@ func _on_player_hurt(_amount: float) -> void:
 		_hud.hint("맞았어요. 칼을 치켜든 쪽을 보세요", 3.0)
 	elif _step_id() == "dodge":
 		_hud.hint("맞았어요. 칼이 내려오기 직전에 스페이스를 누르세요", 3.0)
+
+
+func _on_lock_changed(locked: bool) -> void:
+	_hud.hint("락온 켬" if locked else "락온 끔\n칼을 화면 끝까지 밀면 몸이 돌아갑니다", 2.5)
 
 
 func _on_attack_whiffed() -> void:

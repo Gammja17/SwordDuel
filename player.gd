@@ -7,6 +7,7 @@ extends CharacterBody3D
 
 signal hurt(amount: float)
 signal died
+signal lock_changed(locked: bool)
 
 const SwordScript := preload("res://sword.gd")
 const ArmScript := preload("res://arm.gd")
@@ -32,6 +33,11 @@ const AIM_SENS := 0.0038
 const AIM_MIN := Vector2(-0.85, 0.55)
 const AIM_MAX := Vector2(0.85, 2.05)
 const AIM_REST := Vector2(0.0, 1.45)   # point toward the opponent's face
+# With the lock-on off, steering the blade past the edge of its range turns the body
+# (sideways) or tilts the view (up and down): radians per metre of overshoot.
+const EDGE_TURN := 1.0
+const FREE_PITCH := 0.6
+const FACE_RATE := 20.0   # how quickly the body swings round to the target when locked
 
 # Weight of the sword: the point chases the mouse on a spring whose acceleration and
 # speed are capped. A real cut needs a wind-up, and a hard swing can't reverse at once.
@@ -71,6 +77,7 @@ const POSTURE_RECOVER_RATE := 25.0    # per second
 
 var sword: Node3D
 var target: Node3D   # lock-on target, set by main
+var locked := true   # the wheel click turns the lock-on off and on
 var active := false  # main turns this on when the duel starts
 var practice := false  # in the practice bout, hits are shown but cost no health
 var alive := true
@@ -98,6 +105,7 @@ var _cam: Camera3D
 var _arm_r
 var _arm_l
 var _pitch := 0.0
+var _free_pitch := 0.0
 var _trauma := 0.0
 var _bob := 0.0
 var _step_dist := 0.0
@@ -143,12 +151,14 @@ func _input(event: InputEvent) -> void:
 		if in_bind:
 			_bind_push += mm.relative.x * AIM_SENS   # sideways pressure on the locked blades
 			return
-		var damp := 0.25 if _deflect_timer > 0.0 else 1.0
-		_aim_target.x = clampf(_aim_target.x + mm.relative.x * AIM_SENS * damp, AIM_MIN.x, AIM_MAX.x)
-		_aim_target.y = clampf(_aim_target.y - mm.relative.y * AIM_SENS * damp, AIM_MIN.y, AIM_MAX.y)
+		steer(mm.relative)
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		# Browsers only grant pointer lock from a click, and release it on ESC themselves.
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif event is InputEventMouseButton and event.pressed \
+			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_MIDDLE:
+		toggle_lock()
+		get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
 		if event.pressed and not in_bind:
 			_guard_held = true
@@ -164,6 +174,25 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Mouse movement (pixels) steers the blade's point. With the lock-on off, whatever
+## would carry it past the edge of its range turns the body or tilts the view instead.
+func steer(relative: Vector2) -> void:
+	var damp := 0.25 if _deflect_timer > 0.0 else 1.0
+	var nx := _aim_target.x + relative.x * AIM_SENS * damp
+	var ny := _aim_target.y - relative.y * AIM_SENS * damp
+	if not locked:
+		rotate_y(-(nx - clampf(nx, AIM_MIN.x, AIM_MAX.x)) * EDGE_TURN)
+		_free_pitch = clampf(_free_pitch + (ny - clampf(ny, AIM_MIN.y, AIM_MAX.y)) * EDGE_TURN, -FREE_PITCH, FREE_PITCH)
+	_aim_target.x = clampf(nx, AIM_MIN.x, AIM_MAX.x)
+	_aim_target.y = clampf(ny, AIM_MIN.y, AIM_MAX.y)
+
+
+func toggle_lock() -> void:
+	locked = not locked
+	_free_pitch = _pitch
+	lock_changed.emit(locked)
 
 
 ## Called on a clash: kick the blade (it bounces) and damp control briefly.
@@ -321,8 +350,8 @@ func _physics_process(delta: float) -> void:
 	if _since_block > POSTURE_RECOVER_DELAY and posture > 0.0:
 		posture = maxf(posture - POSTURE_RECOVER_RATE * delta, 0.0)
 
-	if alive:
-		_face_target()
+	if alive and (locked or in_bind):
+		_face_target(delta)
 
 	var input_dir := Vector3.ZERO
 	if active and not in_bind:
@@ -434,18 +463,19 @@ func _clamp_aim(a: Vector2) -> Vector2:
 	return Vector2(clampf(a.x, AIM_MIN.x, AIM_MAX.x), clampf(a.y, AIM_MIN.y, AIM_MAX.y))
 
 
-func _face_target() -> void:
+## Turn to face the target (quickly, so switching the lock back on swings round
+## instead of snapping).
+func _face_target(delta: float) -> void:
 	if target == null:
 		return
-	var tp := target.global_position
-	tp.y = global_position.y
-	if global_position.distance_to(tp) > 0.05:
-		look_at(tp, Vector3.UP)
+	var to := target.global_position - global_position
+	if Vector2(to.x, to.z).length() > 0.05:
+		rotation.y = lerp_angle(rotation.y, atan2(-to.x, -to.z), 1.0 - exp(-FACE_RATE * delta))
 
 
 func _update_camera(delta: float, moving: float) -> void:
-	var look_pitch := 0.0
-	if target != null:
+	var look_pitch := _free_pitch
+	if target != null and (locked or in_bind):
 		var eye := to_global(EYE)
 		var chest := target.global_position + Vector3(0.0, 1.2, 0.0)  # look a bit low: hands in frame
 		var flat := Vector2(chest.x - eye.x, chest.z - eye.z).length()

@@ -24,7 +24,7 @@ const POISE_RANGE := 2.0     # hold the guard here: just outside the player's re
 const ATTACK_RANGE := 1.5    # step in to here during the windup, then cut
 const BLOCKED_FOLLOWUP := 0.25   # after being blocked (not parried), attack again this soon
 const STEP_IN_SPEED := 3.0
-const STEP_OUT_SPEED := 2.4
+const STEP_OUT_SPEED := 2.0   # the walk in reverse keeps its feet planted up to ~2 m/s
 const CIRCLE_SPEED := 1.1
 const PARRY_TIME := 0.32
 const DODGE_TIME := 0.4
@@ -38,7 +38,6 @@ const ATTACKS := {
 	"b": ["ual2/Sword_Regular_B", 0.27],
 	"c": ["ual2/Sword_Regular_C", 0.65],
 	"lunge": ["ual2/Sword_Dash", 0.33],
-	"thrust": ["kay/2H_Melee_Attack_Stab", 0.38],
 }
 
 var hp := 100.0
@@ -212,7 +211,7 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 		_since_flinch = 0.0
 		_state = State.STAGGER
 		_timer = 0.35
-		_body.play_segment("Hit_Chest", 0.0, _body.clip_length("Hit_Chest"), 0.35, 0.05)
+		_body.act("Hit_Chest", 0.0, _body.clip_length("Hit_Chest"), 0.35, 0.05)
 
 
 ## Our blade met the player's.
@@ -261,7 +260,7 @@ func enter_bind() -> void:
 	_wants_bind = false
 	_in_combo = false
 	_state = State.BIND
-	_body.play_segment("ual2/Sword_Block", 0.0, 0.3, 0.15, 0.1)
+	_body.act("ual2/Sword_Block", 0.3, 0.3, 1.0, 0.12)   # hold the block pose
 
 
 func set_bind_point(world_point: Vector3) -> void:
@@ -309,7 +308,7 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 	if _player == null:
-		_body.play("Sword_Idle")
+		_body.move(Vector2.ZERO)
 		return
 
 	_face_player()
@@ -398,6 +397,7 @@ func _run_state(delta: float) -> void:
 					if not _attack_hit:
 						attack_whiffed.emit()
 					_enter(State.RECOVER)
+					_body.act_speed(1.0)   # finish the follow-through at natural speed
 		State.RECOVER:
 			if dist < POISE_RANGE:
 				_move(-STEP_OUT_SPEED)
@@ -454,7 +454,7 @@ func _watch_for_player_cut() -> void:
 	if r < parry:
 		_state = State.PARRY
 		_timer = PARRY_TIME
-		_body.play_segment("ual2/Sword_Block", 0.0, 0.35, PARRY_TIME, 0.04)
+		_body.act("ual2/Sword_Block", 0.0, 0.35, PARRY_TIME, 0.04)
 	elif r < parry + dodge:
 		_start_dodge()
 
@@ -466,7 +466,7 @@ func _start_dodge() -> void:
 	var clip: String = ["kay/Dodge_Backward", "kay/Dodge_Left", "kay/Dodge_Right"][pick]
 	var dirs := [Vector3(0, 0, 1), Vector3(-1, 0, 0.4), Vector3(1, 0, 0.4)]
 	_dodge_dir_local = (dirs[pick] as Vector3).normalized()
-	_body.play_segment(clip, 0.0, _body.clip_length(clip), DODGE_TIME, 0.05)
+	_body.act(clip, 0.0, _body.clip_length(clip), DODGE_TIME, 0.05)
 
 
 ## A long swing that carried the player's blade far off to one side leaves them open:
@@ -488,6 +488,8 @@ func _watch_for_overswing() -> void:
 
 func _enter(state: int) -> void:
 	_state = state
+	if state == State.POISE or state == State.APPROACH:
+		_body.release(0.25)   # back to stance and footwork
 	match state:
 		State.POISE:
 			var p: Vector2 = _t.get("poise", Vector2(0.6, 1.2))
@@ -498,7 +500,7 @@ func _enter(state: int) -> void:
 			_timer = float(_t.get("recover", 0.55))
 		State.STAGGER:
 			_timer = float(_t.get("stagger", 0.9))
-			_body.play_segment("ual2/Hit_Knockback", 0.0, _body.clip_length("ual2/Hit_Knockback"), _timer, 0.05)
+			_body.act("ual2/Hit_Knockback", 0.0, _body.clip_length("ual2/Hit_Knockback"), _timer, 0.08)
 
 
 ## Windup: the attack clip played slowly up to just before its strike.
@@ -514,7 +516,7 @@ func _start_windup(scale: float) -> void:
 	_state = State.WINDUP
 	_timer = _windup_total
 	var a: Array = ATTACKS[_kind]
-	_body.play_segment(a[0], 0.0, maxf(float(a[1]) - STRIKE_LEAD, 0.05), _windup_total, 0.12)
+	_body.act(a[0], 0.0, maxf(float(a[1]) - STRIKE_LEAD, 0.05), _windup_total, 0.15)
 
 
 ## Feint: switch to a different attack partway through the windup, which costs a moment.
@@ -528,40 +530,27 @@ func _feint() -> void:
 	_timer += 0.2
 	var a: Array = ATTACKS[_kind]
 	var until := maxf(float(a[1]) - STRIKE_LEAD, 0.05)
-	_body.play_segment(a[0], until * 0.4, until, _timer, 0.1)
+	_body.act(a[0], until * 0.4, until, _timer, 0.12)
 
 
-## Strike: the clip's fastest part, played over this tier's attack time.
+## Strike: the same clip carries on from the windup (no cut in the motion), sped up so
+## its fastest part takes this tier's attack time.
 func _start_attack() -> void:
-	var a: Array = ATTACKS[_kind]
-	var strike := float(a[1])
 	_attack_hit = false
 	_enter(State.ATTACK)
-	_body.play_segment(a[0], maxf(strike - STRIKE_LEAD, 0.0), strike + STRIKE_TAIL, _timer, 0.0)
+	_body.act_speed((STRIKE_LEAD + STRIKE_TAIL) / maxf(_timer, 0.05))
 	Sfx.play("swing", blade_tip, 0.0)
 
 
-## Legs and body when not attacking: idle guard, walking, backing off, circling.
+## Legs follow the body's velocity every frame; the upper body keeps its guard up
+## (lowered only for the practice target), and after a cut the follow-through fades
+## back into footwork partway through the recovery.
 func _animate_locomotion() -> void:
-	if not (_state == State.IDLE or _state == State.APPROACH or _state == State.POISE or _state == State.RECOVER):
-		return
-	if _state == State.RECOVER and _timer > float(_t.get("recover", 0.55)) * 0.6:
-		_body.ap.speed_scale = 1.0   # let the attack clip finish its follow-through first
-		return
-	if _drill == "open":
-		_body.play("Idle")
-		return
 	var local := global_transform.basis.inverse() * Vector3(velocity.x, 0.0, velocity.z)
-	var fwd := -local.z
-	var side := local.x
-	if absf(side) > 0.4 and absf(side) > absf(fwd):
-		_body.play("kay/Running_Strafe_Right" if side > 0.0 else "kay/Running_Strafe_Left", 0.2, absf(side) / 3.0)
-	elif fwd > 0.4:
-		_body.play("Jog_Fwd", 0.2, fwd / 3.0)
-	elif fwd < -0.4:
-		_body.play("kay/Walking_Backwards", 0.2, -fwd / 1.3)
-	else:
-		_body.play("Sword_Idle", 0.25)
+	_body.move(Vector2(local.x, -local.z))
+	_body.set_guard(0.0 if _drill == "open" else 1.0)
+	if _state == State.RECOVER and _timer < float(_t.get("recover", 0.55)) * 0.6:
+		_body.release(0.3)
 
 
 func _move(speed: float) -> void:

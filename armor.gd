@@ -49,11 +49,11 @@ static func _cached(key: String, maker: Callable) -> StandardMaterial3D:
 
 
 static func steel() -> StandardMaterial3D:
-	return _cached("steel", func(): return pbr("steel", Color(0.80, 0.81, 0.84), 1.0, 0.55, Vector3(2, 2, 2)))
+	return _cached("steel", func(): return pbr("steel", Color(0.86, 0.87, 0.9), 0.8, 0.45, Vector3(2, 2, 2)))
 
 
 static func dark_steel() -> StandardMaterial3D:
-	return _cached("dark_steel", func(): return pbr("steel", Color(0.28, 0.28, 0.30), 1.0, 0.7, Vector3(2, 2, 2)))
+	return _cached("dark_steel", func(): return pbr("steel", Color(0.42, 0.42, 0.44), 0.75, 0.6, Vector3(2, 2, 2)))
 
 
 static func blade() -> StandardMaterial3D:
@@ -64,7 +64,7 @@ static func blade() -> StandardMaterial3D:
 
 
 static func mail() -> StandardMaterial3D:
-	return _cached("mail", func(): return pbr("mail", Color(0.66, 0.66, 0.68), 1.0, 0.6, Vector3(5, 5, 5)))
+	return _cached("mail", func(): return pbr("mail", Color(0.78, 0.78, 0.8), 0.7, 0.55, Vector3(5, 5, 5)))
 
 
 static func leather() -> StandardMaterial3D:
