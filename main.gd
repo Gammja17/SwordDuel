@@ -1,9 +1,10 @@
 extends Node3D
-## 진검승부 — the whole game: a walled courtyard at sunset, three opponents in a row,
-## and the cards between them (title, who you face next, how it went).
+## 진검승부: a walled courtyard at sunset, three opponents in a row, and the cards
+## between them.
 ##
-## Flow: TITLE -> INTRO (who you face) -> FIGHT -> OUTCOME (win: next opponent / lose:
-## try again) -> ... -> FINAL -> TITLE. Everything is built in code.
+## Flow: TITLE -> (first time: PRACTICE, a hands-on drill with the squire) -> INTRO
+## (who you face) -> FIGHT -> OUTCOME (win: next opponent / lose: try again) -> ...
+## -> FINAL -> TITLE. Everything is built in code.
 
 const PlayerScript := preload("res://player.gd")
 const OpponentScript := preload("res://opponent.gd")
@@ -12,44 +13,70 @@ const CombatScript := preload("res://combat.gd")
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
 const WALL_THICK := 0.5
 const SKY_HDRI := "res://assets/hdri/sky_1k.hdr"
+const SAVE_PATH := "user://progress.cfg"
+const GOLD := Color(0.98, 0.82, 0.35)
+const RED := Color(0.95, 0.35, 0.25)
 
 const TIERS := [
 	{
 		"kicker": "첫 번째 상대",
 		"name": "수련기사 도윤",
-		"about": "기사단에 들어온 지 한 해 된 수련기사입니다. 동작이 크고 느려서 칼을 치켜드는 게 잘 보입니다. 치켜든 쪽을 보고, 내려오는 칼을 향해 휘둘러 맞받아 보세요.",
-		"hp": 80.0, "windup": 0.55, "attack": 0.26, "recover": 0.7, "stagger": 0.85,
+		"about": "기사단에 들어온 지 한 해 된 수련기사입니다. 동작이 크고 느려서 칼을 치켜드는 게 잘 보입니다.",
+		"hp": 70.0, "windup": 0.55, "attack": 0.26, "recover": 0.7, "stagger": 0.85,
 		"poise": Vector2(1.0, 1.8), "attack_prob": 0.6, "lines": ["diag"],
-		"feint": 0.0, "combo": 0.0, "punish": 0.15, "riposte": 0.0, "damage": 0.7,
+		"feint": 0.0, "combo": 0.0, "punish": 0.15, "riposte": 0.0, "damage": 0.5,
+		"armor": 0.5, "flinch_speed": 6.0,
+		"parry": 0.1, "bind_press": 0.25, "bind_strength": 0.5, "bind_switch": Vector2(2.2, 3.2), "exit_cut": 0.2,
 		"guard_track": 4.0, "speed": 2.2,
 		"tabard": Color(0.20, 0.30, 0.55), "crest": false,
 	},
 	{
 		"kicker": "두 번째 상대",
 		"name": "기사 서혁",
-		"about": "좌우로 번갈아 벱니다. 가끔 한쪽으로 치켜들었다가 반대쪽으로 바꿔 베니, 칼이 어느 쪽에서 내려오는지 끝까지 보고 맞받으세요.",
-		"hp": 100.0, "windup": 0.42, "attack": 0.22, "recover": 0.55, "stagger": 0.65,
+		"about": "좌우로 번갈아 베고, 가끔 치켜든 쪽을 바꿔 속입니다. 함부로 휘두르면 받아칩니다.",
+		"hp": 90.0, "windup": 0.46, "attack": 0.23, "recover": 0.6, "stagger": 0.7,
 		"poise": Vector2(0.6, 1.3), "attack_prob": 0.7, "lines": ["diag", "horiz"],
-		"feint": 0.3, "combo": 0.15, "punish": 0.45, "riposte": 0.35, "damage": 1.0,
+		"feint": 0.25, "combo": 0.15, "punish": 0.4, "riposte": 0.3, "damage": 0.65,
+		"armor": 2.0, "flinch_speed": 9.0,
+		"parry": 0.3, "bind_press": 0.35, "bind_strength": 0.6, "bind_switch": Vector2(1.7, 2.7), "exit_cut": 0.45,
 		"guard_track": 7.0, "speed": 2.5,
 		"tabard": Color(0.55, 0.12, 0.10), "crest": false,
 	},
 	{
 		"kicker": "마지막 상대",
 		"name": "검술사범 무진",
-		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 베기와 찌르기를 섞어 연달아 들어옵니다. 함부로 거리를 좁히면 먼저 칩니다. 한 번 휘두르고 물러나는 틈을 노리세요.",
-		"hp": 130.0, "windup": 0.34, "attack": 0.19, "recover": 0.45, "stagger": 0.5,
+		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 찌르기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
+		"hp": 120.0, "windup": 0.36, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
 		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["diag", "horiz", "thrust"],
-		"feint": 0.35, "combo": 0.45, "punish": 0.8, "riposte": 0.6, "damage": 1.15,
+		"feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5, "damage": 0.85,
+		"armor": 3.0, "flinch_speed": 11.0,
+		"parry": 0.55, "bind_press": 0.5, "bind_strength": 0.8, "bind_switch": Vector2(1.3, 2.2), "exit_cut": 0.7,
 		"guard_track": 12.0, "speed": 2.8,
 		"tabard": Color(0.10, 0.10, 0.12), "crest": true,
 	},
+]
+
+# The squire as a patient sparring partner: slow, harmless, never parries or feints.
+const PRACTICE_TIER := {
+	"name": "수련기사 도윤", "hp": 99999.0, "windup": 0.9, "attack": 0.34, "recover": 0.9, "stagger": 0.9,
+	"poise": Vector2(1.2, 1.8), "attack_prob": 1.0, "lines": ["diag"],
+	"feint": 0.0, "combo": 0.0, "punish": 0.0, "riposte": 0.0, "damage": 0.0,
+	"armor": 0.0, "flinch_speed": 3.0,
+	"parry": 0.0, "bind_press": 0.0, "bind_strength": 0.4, "bind_switch": Vector2(1.8, 2.6), "exit_cut": 0.0,
+	"guard_track": 3.0, "speed": 2.0,
+	"tabard": Color(0.20, 0.30, 0.55), "crest": false,
+}
+const PRACTICE_STEPS := [
+	{"drill": "idle", "task": "마우스를 크게 휘둘러 보세요"},
+	{"drill": "open", "task": "W로 다가가서 베어 보세요"},
+	{"drill": "attack", "task": "내려오는 칼을 향해 휘둘러 쳐내세요"},
+	{"drill": "bind", "task": "칼이 맞물리면 화살표 쪽으로 마우스를 미세요"},
 ]
 
 var hitstop_enabled := true   # the headless probe turns this off
@@ -68,10 +95,16 @@ var _stats := {}
 var _totals := {}
 var _hints_shown := {}
 var _torches: Array[OmniLight3D] = []
+var _practice_done := false
+var _practice_step := -1
+var _step_done_at := 0
+var _rebind_at := 0
+var _visibility_cb: JavaScriptObject
 
 
 func _ready() -> void:
 	_register_inputs()
+	_load_progress()
 	_build_world()
 	_hud = HudScript.new()
 	add_child(_hud)
@@ -79,6 +112,7 @@ func _ready() -> void:
 	_title_cam.fov = 55.0
 	add_child(_title_cam)
 	Sfx.start_ambience("wind_loop", -12.0)
+	_setup_web()
 	_totals = _new_stats()
 	_to_title()
 
@@ -95,18 +129,27 @@ func _process(delta: float) -> void:
 			_title_angle += delta * 0.06
 			_title_cam.position = Vector3(sin(_title_angle) * 7.0, 2.3, cos(_title_angle) * 7.0)
 			_title_cam.look_at(Vector3(0.0, 1.2, 0.0), Vector3.UP)
-		Phase.FIGHT, Phase.OUTCOME:
+		Phase.FIGHT, Phase.OUTCOME, Phase.PRACTICE:
 			if is_instance_valid(_player) and is_instance_valid(_opponent):
 				_hud.set_enemy_hp(_opponent.hp / _opponent.max_hp)
-				_hud.set_player(_player.hp / 100.0, _player.posture / 100.0, _player.hurt_flash)
-				if _phase == Phase.FIGHT:
-					_watch_for_hints()
+				_hud.set_player(_player.hp / 100.0, _player.posture / 100.0, _player.hurt_flash, _player.breath / 100.0)
+				if is_instance_valid(_combat) and _combat.is_bound():
+					var b: Dictionary = _combat.bind
+					_hud.show_bind(b.a, -float(b.ai_dir), b.tell > 0.0)
+				else:
+					_hud.hide_bind()
+				if _phase == Phase.PRACTICE:
+					_run_practice()
 
 
 func _input(event: InputEvent) -> void:
 	var click: bool = event is InputEventMouseButton and event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT
 	var key: bool = event is InputEventKey and event.pressed and not event.is_echo() \
 		and (event as InputEventKey).physical_keycode in [KEY_SPACE, KEY_ENTER]
+	if _phase == Phase.TITLE and event is InputEventKey and event.pressed \
+			and (event as InputEventKey).physical_keycode == KEY_P:
+		_start_practice()
+		return
 	if click or key:
 		_advance()
 
@@ -118,6 +161,12 @@ func _advance() -> void:
 		return
 	match _phase:
 		Phase.TITLE:
+			_totals = _new_stats()
+			if _practice_done:
+				_intro(0)
+			else:
+				_start_practice()
+		Phase.PRACTICE_DONE:
 			_totals = _new_stats()
 			_intro(0)
 		Phase.INTRO:
@@ -140,31 +189,32 @@ func _to_title() -> void:
 	# A knight waiting in the courtyard while the camera circles.
 	_opponent = OpponentScript.new()
 	add_child(_opponent)
-	_opponent.position = Vector3(0.0, 0.0, 0.0)
 	_opponent.setup(null, TIERS[0])
 	_title_cam.current = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.show_fight_ui(false)
 	_hud.clear_hint()
+	_hud.clear_task()
+	_hud.hide_bind()
 	_hud.show_card("1대1 검술 결투", "진검승부",
-		"마우스로 칼을 움직입니다. 빠르게 그을수록 깊게 벱니다.\n"
-		+ "W · S로 다가서거나 물러나고, A · D로 옆으로 움직입니다.\n"
-		+ "상대가 베어 올 때 그 칼을 향해 휘두르면 쳐냅니다. 칼을 대고만 있으면 막기만 되고, 막을수록 자세가 무너집니다.\n"
-		+ "세 사람을 차례로 이기면 끝납니다.",
-		"클릭하면 시작합니다")
+		"마우스로 칼을 휘둘러 싸웁니다.\nW 다가서기, S 물러나기, A와 D 옆걸음\n세 사람을 차례로 이기면 끝납니다.",
+		"클릭하면 시작합니다\nP를 누르면 연습을 다시 합니다" if _practice_done else "클릭하면 연습부터 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
+	_set_fps()
 
 
 func _intro(tier: int) -> void:
 	_tier = tier
 	_phase = Phase.INTRO
-	_spawn_duel(tier)
+	_spawn_duel(TIERS[tier])
 	var t: Dictionary = TIERS[tier]
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.show_fight_ui(false)
 	_hud.clear_hint()
+	_hud.clear_task()
 	_hud.show_card(t["kicker"], t["name"], t["about"], "클릭하면 겨룹니다")
 	_click_ready_at = Time.get_ticks_msec() + 400
+	_set_fps()
 
 
 func _start_fight() -> void:
@@ -176,8 +226,7 @@ func _start_fight() -> void:
 	_player.active = true
 	_opponent.begin()
 	Sfx.play_flat("draw", -2.0)
-	if _tier == 0:
-		_hint_once("start", "W로 한 걸음 다가서야 칼이 닿습니다. 상대가 칼을 치켜들면 그쪽을 잘 보세요.")
+	_set_fps()
 
 
 func _on_opponent_died() -> void:
@@ -197,7 +246,8 @@ func _outcome() -> void:
 	_phase = Phase.OUTCOME
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.clear_hint()
-	for k in ["parries", "blocks", "cuts", "hits"]:
+	_hud.hide_bind()
+	for k in ["parries", "blocks", "cuts", "hits", "binds_won", "binds_lost", "parried_me"]:
 		_totals[k] += _stats[k]
 	var t: Dictionary = TIERS[_tier]
 	var name_: String = t["name"]
@@ -209,6 +259,7 @@ func _outcome() -> void:
 		_hud.show_card("패배", name_, name_ + "에게 쓰러졌습니다.\n\n" + _stats_line(_stats) + "\n\n" + _advice(),
 			"클릭하면 다시 겨룹니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
+	_set_fps()
 
 
 func _final() -> void:
@@ -217,20 +268,25 @@ func _final() -> void:
 	_hud.show_card("진검승부", "완승", "세 사람을 모두 이겼습니다.\n\n" + _stats_line(_totals),
 		"클릭하면 처음 화면으로 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
+	_set_fps()
 
 
 ## What to try next, based on how the lost duel went.
 func _advice() -> String:
 	if _stats["blocks"] > _stats["parries"] * 2 and _stats["blocks"] >= 3:
-		return "막기만 하면 자세가 무너집니다. 내려오는 칼에 맞춰 휘둘러 쳐내 보세요."
+		return "막기만 하면 자세가 무너집니다. 내려오는 칼을 향해 휘둘러 쳐내 보세요."
+	if _stats["parried_me"] >= 3:
+		return "막 휘두르면 상대가 받아칩니다. 쳐낸 뒤나 상대가 물러날 때 베세요."
+	if _stats["binds_lost"] >= 2:
+		return "힘싸움에서는 화살표 쪽으로 계속 미세요. 화살표가 바뀌면 바로 따라 바꾸세요."
 	if _stats["parries"] == 0:
-		return "상대가 칼을 치켜들면, 그 칼이 내려올 쪽으로 칼을 휘둘러 맞받으세요."
+		return "상대가 칼을 치켜들면 그 칼이 내려올 쪽으로 휘둘러 맞받으세요."
 	if _stats["cuts"] == 0:
 		return "쳐낸 뒤 상대가 흔들릴 때 W로 다가가 베세요."
 	return "상대가 한 번 휘두르고 물러날 때 따라 들어가 베세요."
 
 
-func _spawn_duel(tier: int) -> void:
+func _spawn_duel(tier: Dictionary) -> void:
 	_clear_duel()
 	_stats = _new_stats()
 
@@ -243,13 +299,15 @@ func _spawn_duel(tier: int) -> void:
 	_opponent.name = "Opponent"
 	add_child(_opponent)
 	_opponent.position = Vector3(0.0, 0.0, -2.0)
-	_opponent.setup(_player, TIERS[tier])
+	_opponent.setup(_player, tier)
 	_player.target = _opponent
 
 	_combat = CombatScript.new()
 	_combat.player = _player
 	_combat.opponent = _opponent
+	_combat.tier = tier
 	add_child(_combat)
+	_combat.bind_ended.connect(_on_bind_ended)
 
 	_player.camera().current = true
 	_player.sword.cut_registered.connect(_on_cut)
@@ -275,27 +333,101 @@ func debug_start(tier: int) -> void:
 	_start_fight()
 
 
+# --- hands-on practice ----------------------------------------------------------------
+
+func _start_practice() -> void:
+	_phase = Phase.PRACTICE
+	_spawn_duel(PRACTICE_TIER)
+	_player.practice = true
+	_player.active = true
+	_hud.hide_card()
+	_hud.show_fight_ui(true, false)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	Sfx.play_flat("draw", -2.0)
+	_set_practice_step(0)
+	_set_fps()
+
+
+func _set_practice_step(i: int) -> void:
+	_practice_step = i
+	_step_done_at = 0
+	_rebind_at = 0
+	var st: Dictionary = PRACTICE_STEPS[i]
+	_opponent.set_drill(st["drill"])
+	_combat.set("allow_binds", st["drill"] == "bind")
+	_hud.task("연습 %d/%d\n%s" % [i + 1, PRACTICE_STEPS.size(), st["task"]])
+
+
+func _practice_success() -> void:
+	if _step_done_at > 0:
+		return
+	_hud.popup("좋아요!", GOLD)
+	_step_done_at = Time.get_ticks_msec() + 900
+
+
+func _run_practice() -> void:
+	var now := Time.get_ticks_msec()
+	if _step_done_at > 0 and now >= _step_done_at:
+		if _practice_step + 1 < PRACTICE_STEPS.size():
+			_set_practice_step(_practice_step + 1)
+		else:
+			_finish_practice()
+		return
+	var sword = _player.sword
+	match _practice_step:
+		0:
+			if sword.can_cut():
+				_practice_success()
+			elif sword.swing_speed >= 3.0:
+				_hint_once("p_bigger", "더 크게 휘둘러 보세요")
+		3:
+			var dist: float = _opponent.call("_horizontal_dist", _player.global_position)
+			if not _combat.is_bound() and now >= _rebind_at and dist < 2.4 and _step_done_at == 0:
+				_combat.begin_bind((sword.base + sword.tip + _opponent.blade_base + _opponent.blade_tip) * 0.25)
+
+
+func _finish_practice() -> void:
+	_practice_done = true
+	_save_progress()
+	_phase = Phase.PRACTICE_DONE
+	_player.active = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_hud.clear_task()
+	_hud.clear_hint()
+	_hud.hide_bind()
+	_hud.show_fight_ui(false)
+	_hud.show_card("연습 끝", "잘했어요",
+		"이제 진짜로 겨룹니다.\n연습은 처음 화면에서 P를 누르면 다시 할 수 있어요.",
+		"클릭하면 첫 상대를 만납니다")
+	_click_ready_at = Time.get_ticks_msec() + 500
+	_set_fps()
+
+
 # --- combat feedback ------------------------------------------------------------------
 
 func _on_clash(_pos: Vector3, result: String) -> void:
 	match result:
 		"PARRY!":
 			_stats["parries"] += 1
-			_hud.popup("쳐내기!", Color(0.98, 0.82, 0.35))
+			_hud.popup("쳐내기!", GOLD)
 			_hitstop(0.09)
-			if _tier == 0:
-				_hint_once("parry", "쳐냈습니다! 상대가 흔들리는 동안 다가가 베세요.")
+			if _phase == Phase.PRACTICE and _practice_step == 2:
+				_practice_success()
+		"PARRIED":
+			_stats["parried_me"] += 1
+			_hud.popup("상대가 쳐냈다!", RED)
+			_hitstop(0.07)
 		"BLOCKED":
 			_stats["blocks"] += 1
 			_hud.popup("막음", Color(0.8, 0.8, 0.78))
 			_hitstop(0.05)
-			if _tier == 0:
-				_hint_once("block", "칼을 대고만 있으면 막기입니다. 막을 때마다 아래쪽 자세 게이지가 찹니다.")
+			if _phase == Phase.PRACTICE and _practice_step == 2:
+				_hud.hint("막기만 했어요. 칼을 향해 휘둘러야 쳐냅니다", 3.0)
 		"GUARD BROKEN":
 			_stats["blocks"] += 1
-			_hud.popup("자세 무너짐!", Color(0.95, 0.35, 0.25))
+			_hud.popup("자세 무너짐!", RED)
 			_hitstop(0.08)
-			_hint_once("broken", "자세가 무너졌습니다. S로 물러나 거리를 벌리세요.")
+			_hint_once("broken", "자세가 무너졌어요. S로 물러나세요")
 		_:
 			_hud.popup("챙!", Color(0.95, 0.95, 0.92))
 			_hitstop(0.04)
@@ -303,27 +435,44 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 
 func _on_cut(strength: float, _pos: Vector3) -> void:
 	_stats["cuts"] += 1
-	_hitstop(0.07)
-	if strength > 12.0:
+	var armor := float(_opponent.tier_value("armor", 1.5)) if is_instance_valid(_opponent) else 0.0
+	if strength - armor < 3.5:
+		_hud.popup("얕다", Color(0.75, 0.75, 0.72))   # the plate took it
+		_hitstop(0.03)
+	elif strength - armor > 9.0:
 		_hud.popup("깊게 베었다!", Color(0.95, 0.45, 0.35))
-	if _tier == 0:
-		_hint_once("cut", "베었습니다! 더 빠르게 그을수록 더 깊이 들어갑니다.")
+		_hitstop(0.09)
+	else:
+		_hitstop(0.07)
+	if _phase == Phase.PRACTICE and _practice_step == 1:
+		_practice_success()
 
 
 func _on_player_hurt(_amount: float) -> void:
 	_stats["hits"] += 1
 	_hitstop(0.08)
-	if _tier == 0 and _stats["parries"] == 0:
-		_hint_once("hurt", "맞았습니다. 상대가 칼을 치켜들면 S로 물러나거나, 내려오는 칼을 향해 휘둘러 맞받으세요.")
+	if _phase == Phase.PRACTICE and _practice_step == 2:
+		_hud.hint("맞았어요. 칼을 치켜든 쪽을 보세요", 3.0)
 
 
-func _watch_for_hints() -> void:
-	if _tier != 0:
-		return
-	if _opponent.is_attacking():
-		_hint_once("windup", "상대가 칼을 치켜들었습니다. 내려오는 칼을 향해 마우스를 휘둘러 맞받으세요!")
-	if _player.sword.is_binding():
-		_hint_once("bind", "칼이 맞물렸습니다. 마우스를 계속 밀어붙이면 상대 칼을 걷어냅니다.")
+func _on_bind_ended(result: String) -> void:
+	match result:
+		"won":
+			_stats["binds_won"] += 1
+			_hud.popup("걷어냈다!", GOLD)
+			_hitstop(0.08)
+			if _phase == Phase.PRACTICE and _practice_step == 3:
+				_practice_success()
+		"lost":
+			_stats["binds_lost"] += 1
+			_hud.popup("밀렸다!", RED)
+			_hitstop(0.06)
+			if _phase == Phase.PRACTICE:
+				_hud.hint("밀렸어요. 화살표 쪽으로 계속 미세요", 3.0)
+		"pulled_out":
+			if _phase == Phase.PRACTICE:
+				_hud.hint("S를 누르면 칼을 뺍니다. 다시 해 봐요", 3.0)
+	_rebind_at = Time.get_ticks_msec() + 1500
 
 
 func _hint_once(key: String, text: String) -> void:
@@ -341,11 +490,13 @@ func _hitstop(seconds: float) -> void:
 
 
 func _new_stats() -> Dictionary:
-	return {"parries": 0, "blocks": 0, "cuts": 0, "hits": 0, "won": false}
+	return {"parries": 0, "blocks": 0, "cuts": 0, "hits": 0, "binds_won": 0, "binds_lost": 0,
+		"parried_me": 0, "won": false}
 
 
 func _stats_line(s: Dictionary) -> String:
-	return "쳐내기 %d번 · 막기 %d번 · 벤 횟수 %d번 · 맞은 횟수 %d번" % [s["parries"], s["blocks"], s["cuts"], s["hits"]]
+	return "쳐내기 %d번, 막기 %d번, 벤 횟수 %d번\n힘싸움 %d승 %d패, 맞은 횟수 %d번" % [
+		s["parries"], s["blocks"], s["cuts"], s["binds_won"], s["binds_lost"], s["hits"]]
 
 
 ## 을/를 depending on whether the last syllable ends in a consonant (받침).
@@ -356,6 +507,48 @@ func _obj_particle(word: String) -> String:
 	if code >= 0xAC00 and code <= 0xD7A3 and (code - 0xAC00) % 28 != 0:
 		return "을"
 	return "를"
+
+
+# --- saving, web and frame rate ------------------------------------------------------
+
+func _load_progress() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_PATH) == OK:
+		_practice_done = bool(cfg.get_value("progress", "practice_done", false))
+
+
+func _save_progress() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("progress", "practice_done", _practice_done)
+	cfg.save(SAVE_PATH)
+
+
+## 60 fps while fighting, 30 on the cards between fights.
+func _set_fps() -> void:
+	Engine.max_fps = 60 if (_phase == Phase.FIGHT or _phase == Phase.PRACTICE) else 30
+
+
+## In the browser: stop everything while the tab is hidden, and keep the 3D resolution
+## reasonable on very high pixel-density screens.
+func _setup_web() -> void:
+	if not OS.has_feature("web"):
+		return
+	_visibility_cb = JavaScriptBridge.create_callback(_on_visibility_change)
+	var document := JavaScriptBridge.get_interface("document")
+	document.addEventListener("visibilitychange", _visibility_cb)
+	var dpr := float(JavaScriptBridge.eval("window.devicePixelRatio || 1", true))
+	if dpr > 2.0:
+		get_viewport().scaling_3d_scale = 2.0 / dpr
+
+
+func _on_visibility_change(_args: Array) -> void:
+	var hidden := bool(JavaScriptBridge.eval("document.hidden", true))
+	get_tree().paused = hidden
+	AudioServer.set_bus_mute(0, hidden)
+	if hidden:
+		Engine.max_fps = 5
+	else:
+		_set_fps()
 
 
 # --- input actions (registered in code so we don't hand-edit project.godot) ---------
@@ -403,7 +596,6 @@ func _build_world() -> void:
 		else:
 			size = Vector3(WALL_THICK, WALL_HEIGHT, ARENA_HALF * 2.0 + WALL_THICK)
 		_solid_box(side * ARENA_HALF + Vector3(0.0, WALL_HEIGHT * 0.5, 0.0), size, Armor.wall_stone())
-		# Coping stones along the top.
 		Armor.part(self, Armor.box(Vector3(size.x + 0.08, 0.1, size.z + 0.08)), Armor.wall_stone(),
 			side * ARENA_HALF + Vector3(0.0, WALL_HEIGHT + 0.05, 0.0))
 
@@ -421,12 +613,12 @@ func _build_world() -> void:
 			var color := Color(0.50, 0.08, 0.07) if bz < 0.0 else Color(0.12, 0.18, 0.40)
 			var at := Vector3(bx * (ARENA_HALF - 0.3), 0.0, bz)
 			Armor.part(self, Armor.cylinder(0.035, 0.035, 2.9), Armor.wood(), at + Vector3(0.0, 1.45, 0.0))
-			var banner := Armor.part(self, Armor.box(Vector3(0.03, 1.5, 0.8)), Armor.cloth(color), at + Vector3(-bx * 0.03, 2.0, 0.0))
-			banner.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			Armor.part(self, Armor.box(Vector3(0.03, 1.5, 0.8)), Armor.cloth(color), at + Vector3(-bx * 0.03, 2.0, 0.0))
 			Armor.part(self, Armor.cylinder(0.025, 0.025, 0.95), Armor.wood(), at + Vector3(-bx * 0.03, 2.77, 0.0)).rotation_degrees = Vector3(90, 0, 0)
 
 	_weapon_rack(Vector3(6.6, 0.0, -6.6), deg_to_rad(45.0))
 	_weapon_rack(Vector3(-6.6, 0.0, 6.6), deg_to_rad(-135.0))
+	_props()
 
 	# Low sun from the side, sky and ambient from the HDRI.
 	var sun := DirectionalLight3D.new()
@@ -462,6 +654,59 @@ func _build_world() -> void:
 	add_child(world_env)
 
 
+## Photoscanned CC0 props from Poly Haven (assets/props, see CREDITS.md).
+func _props() -> void:
+	# The gate at the far end: the castle door between two pillars under a lintel.
+	_prop("castle_door/large_castle_door_1k.gltf", Vector3(0.0, 0.0, -7.55), 0.0)
+	for gx in [-1.35, 1.35]:
+		_solid_box(Vector3(gx, 1.7, -7.7), Vector3(0.7, 3.4, 0.7), Armor.wall_stone())
+	_solid_box(Vector3(0.0, 3.6, -7.7), Vector3(3.4, 0.45, 0.8), Armor.wall_stone())
+
+	_prop("barrel/wine_barrel_01_1k.gltf", Vector3(6.85, 0.0, -3.6), 20.0, Vector3(0.75, 0.9, 0.75))
+	_prop("barrel/wine_barrel_01_1k.gltf", Vector3(6.9, 0.0, -2.75), -35.0, Vector3(0.75, 0.9, 0.75))
+	_prop("barrel/wine_barrel_01_1k.gltf", Vector3(6.1, 0.0, -3.2), 70.0, Vector3(0.75, 0.9, 0.75))
+	_prop("bucket/wooden_bucket_01_1k.gltf", Vector3(6.4, 0.0, 2.3), 15.0)
+	_prop("crate/wooden_crate_01_1k.gltf", Vector3(-6.9, 0.0, -3.0), 90.0, Vector3(0.45, 0.72, 0.85))
+	_prop("crate/wooden_crate_01_1k.gltf", Vector3(-6.9, 0.36, -3.0), 84.0)
+	_prop("lantern/wooden_lantern_01_1k.gltf", Vector3(-6.9, 0.71, -3.2), 10.0)
+	_prop("stool/wooden_stool_01_1k.gltf", Vector3(-6.5, 0.0, 2.6), 30.0)
+	var shield := _prop("kite_shield/kite_shield_1k.gltf", Vector3(5.75, 0.0, -7.1), 45.0)
+	if shield:
+		shield.rotation_degrees.x = -12.0
+
+	# A fire pit in the far corner: real fire light on the stones.
+	var pit := _prop("fire_pit/stone_fire_pit_1k.gltf", Vector3(-5.6, 0.0, -5.6), 0.0, Vector3(1.3, 0.4, 1.3))
+	if pit:
+		_torch_fire(Vector3(-5.6, 0.1, -5.6), 2.5)
+
+
+## Loads a glTF prop (skipped if the file is missing). collider = box size, if solid.
+func _prop(path: String, pos: Vector3, yaw_deg: float, collider := Vector3.ZERO) -> Node3D:
+	var full := "res://assets/props/" + path
+	if not ResourceLoader.exists(full):
+		return null
+	var scene := load(full) as PackedScene
+	if scene == null:
+		return null
+	var node := scene.instantiate() as Node3D
+	node.position = pos
+	node.rotation_degrees.y = yaw_deg
+	add_child(node)
+	if collider != Vector3.ZERO:
+		var body := StaticBody3D.new()
+		body.collision_layer = 1
+		body.collision_mask = 0
+		body.position = pos + Vector3(0.0, collider.y * 0.5, 0.0)
+		body.rotation_degrees.y = yaw_deg
+		var col := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = collider
+		col.shape = box
+		body.add_child(col)
+		add_child(body)
+	return node
+
+
 func _solid_box(center: Vector3, size: Vector3, mat: Material) -> void:
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
@@ -478,16 +723,23 @@ func _solid_box(center: Vector3, size: Vector3, mat: Material) -> void:
 
 func _torch(pos: Vector3) -> void:
 	Armor.part(self, Armor.cylinder(0.04, 0.03, 0.45), Armor.wood(), pos)
+	_torch_fire(pos + Vector3(0.0, 0.28, 0.0), 1.0)
+
+
+## Flickering flame particles and a warm light. size scales both (a fire pit is bigger).
+func _torch_fire(at: Vector3, size: float) -> void:
 	var flame := CPUParticles3D.new()
-	flame.amount = 24
+	flame.amount = int(24 * size)
 	flame.lifetime = 0.6
 	flame.direction = Vector3.UP
 	flame.spread = 12.0
 	flame.initial_velocity_min = 0.3
 	flame.initial_velocity_max = 0.7
 	flame.gravity = Vector3(0.0, 0.6, 0.0)
-	flame.scale_amount_min = 0.6
-	flame.scale_amount_max = 1.0
+	flame.scale_amount_min = 0.6 * size
+	flame.scale_amount_max = 1.0 * size
+	flame.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	flame.emission_sphere_radius = 0.04 * size
 	var q := SphereMesh.new()
 	q.radius = 0.05
 	q.height = 0.1
@@ -505,14 +757,14 @@ func _torch(pos: Vector3) -> void:
 	ramp.set_color(1, Color(0.9, 0.2, 0.05, 0.0))
 	flame.color_ramp = ramp
 	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	flame.position = pos + Vector3(0.0, 0.28, 0.0)
+	flame.position = at
 	add_child(flame)
 
 	var light := OmniLight3D.new()
 	light.light_color = Color(1.0, 0.62, 0.3)
 	light.light_energy = 1.3
-	light.omni_range = 7.0
-	light.position = pos + Vector3(0.0, 0.45, 0.0)
+	light.omni_range = 7.0 * sqrt(size)
+	light.position = at + Vector3(0.0, 0.17 * size, 0.0)
 	add_child(light)
 	_torches.append(light)
 

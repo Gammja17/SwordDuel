@@ -14,6 +14,7 @@ var _enemy_fill: ColorRect
 var _player_box: Control
 var _hp_fill: ColorRect
 var _guard_fill: ColorRect
+var _breath_fill: ColorRect
 var _popup: Label
 var _hint_panel: PanelContainer
 var _hint: Label
@@ -26,6 +27,12 @@ var _card_footer: Label
 var _fade: ColorRect
 var _hint_tween: Tween
 var _popup_tween: Tween
+var _bind_box: Control
+var _bind_marker: ColorRect
+var _bind_fill: ColorRect
+var _bind_label: Label
+var _task_panel: PanelContainer
+var _task: Label
 
 const BAR_W := 420.0
 
@@ -75,6 +82,8 @@ func _ready() -> void:
 	_hint_panel.add_child(_hint)
 	_root.add_child(_hint_panel)
 
+	_build_bind_box()
+	_build_task_panel()
 	_build_card()
 
 	_fade = ColorRect.new()
@@ -88,9 +97,42 @@ func _ready() -> void:
 
 # --- public API ---------------------------------------------------------------
 
-func show_fight_ui(on: bool) -> void:
-	_enemy_box.visible = on
+func show_fight_ui(on: bool, show_enemy := true) -> void:
+	_enemy_box.visible = on and show_enemy
 	_player_box.visible = on
+
+
+## Bind contest: balance -1 (losing) .. +1 (winning); push_dir is the way the player
+## should push the mouse (-1 left, +1 right); warn while the opponent is about to switch.
+func show_bind(balance: float, push_dir: float, warn: bool) -> void:
+	_bind_box.visible = true
+	var w := 360.0
+	var x := (clampf(balance, -1.0, 1.0) + 1.0) * 0.5 * w
+	_bind_marker.position.x = x - 4.0
+	if balance >= 0.0:
+		_bind_fill.position.x = w * 0.5
+		_bind_fill.size.x = x - w * 0.5
+		_bind_fill.color = GOLD
+	else:
+		_bind_fill.position.x = x
+		_bind_fill.size.x = w * 0.5 - x
+		_bind_fill.color = Color(0.85, 0.2, 0.15)
+	_bind_label.text = "◀ 밀어라 ◀" if push_dir < 0.0 else "▶ 밀어라 ▶"
+	_bind_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.25) if warn else Color(0.97, 0.95, 0.88))
+
+
+func hide_bind() -> void:
+	_bind_box.visible = false
+
+
+## Persistent practice instruction (stays until changed or cleared).
+func task(text: String) -> void:
+	_task.text = text
+	_task_panel.visible = true
+
+
+func clear_task() -> void:
+	_task_panel.visible = false
 
 
 func set_enemy(enemy_name: String) -> void:
@@ -101,7 +143,9 @@ func set_enemy_hp(frac: float) -> void:
 	_enemy_fill.size.x = BAR_W * clampf(frac, 0.0, 1.0)
 
 
-func set_player(hp_frac: float, guard_frac: float, hurt: float) -> void:
+func set_player(hp_frac: float, guard_frac: float, hurt: float, breath_frac := 1.0) -> void:
+	_breath_fill.size.x = 300.0 * clampf(breath_frac, 0.0, 1.0)
+	_breath_fill.color = Color(0.95, 0.5, 0.3) if breath_frac < 0.35 else Color(0.55, 0.75, 0.9)
 	_hp_fill.size.x = 300.0 * clampf(hp_frac, 0.0, 1.0)
 	_guard_fill.size.x = 300.0 * clampf(guard_frac, 0.0, 1.0)
 	_guard_fill.color = Color(0.95, 0.35, 0.2) if guard_frac > 0.66 else GOLD
@@ -189,15 +233,79 @@ func _build_player_box() -> void:
 	_player_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_player_box.offset_left = -150
 	_player_box.offset_right = 150
-	_player_box.offset_top = -64
+	_player_box.offset_top = -82
 	_player_box.offset_bottom = -20
 	_player_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_player_box)
 
-	_guard_fill = _bar(_player_box, Vector2(0, 8), Vector2(300, 7), GOLD)
-	_hp_fill = _bar(_player_box, Vector2(0, 26), Vector2(300, 9), Color(0.72, 0.14, 0.12))
-	_side_label(_player_box, "자세", Vector2(-54, 0))
-	_side_label(_player_box, "체력", Vector2(-54, 19))
+	_breath_fill = _bar(_player_box, Vector2(0, 8), Vector2(300, 6), Color(0.55, 0.75, 0.9))
+	_guard_fill = _bar(_player_box, Vector2(0, 26), Vector2(300, 7), GOLD)
+	_hp_fill = _bar(_player_box, Vector2(0, 44), Vector2(300, 9), Color(0.72, 0.14, 0.12))
+	_side_label(_player_box, "숨", Vector2(-54, 0))
+	_side_label(_player_box, "자세", Vector2(-54, 18))
+	_side_label(_player_box, "체력", Vector2(-54, 37))
+
+
+func _build_bind_box() -> void:
+	_bind_box = Control.new()
+	_bind_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_bind_box.anchor_top = 0.74
+	_bind_box.anchor_bottom = 0.74
+	_bind_box.offset_left = -180
+	_bind_box.offset_right = 180
+	_bind_box.offset_top = -40
+	_bind_box.offset_bottom = 20
+	_bind_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_bind_box)
+
+	_bind_label = Label.new()
+	_bind_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_bind_label.size = Vector2(360, 34)
+	_bind_label.add_theme_font_size_override("font_size", 28)
+	_bind_label.add_theme_font_override("font", _title_font())
+	_bind_box.add_child(_bind_label)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.05, 0.05, 0.06, 0.8)
+	bg.position = Vector2(-2, 38)
+	bg.size = Vector2(364, 16)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bind_box.add_child(bg)
+	_bind_fill = ColorRect.new()
+	_bind_fill.position = Vector2(180, 40)
+	_bind_fill.size = Vector2(0, 12)
+	_bind_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bind_box.add_child(_bind_fill)
+	var mid := ColorRect.new()
+	mid.color = Color(1, 1, 1, 0.5)
+	mid.position = Vector2(179, 36)
+	mid.size = Vector2(2, 20)
+	_bind_box.add_child(mid)
+	_bind_marker = ColorRect.new()
+	_bind_marker.color = Color(1, 1, 1)
+	_bind_marker.position = Vector2(176, 34)
+	_bind_marker.size = Vector2(8, 24)
+	_bind_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bind_box.add_child(_bind_marker)
+	_bind_box.visible = false
+
+
+func _build_task_panel() -> void:
+	_task_panel = PanelContainer.new()
+	_task_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_task_panel.offset_top = 90
+	_task_panel.offset_bottom = 140
+	_task_panel.offset_left = -330
+	_task_panel.offset_right = 330
+	_task_panel.add_theme_stylebox_override("panel", _panel_style(0.6, 12))
+	_task = Label.new()
+	_task.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_task.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_task.add_theme_font_size_override("font_size", 24)
+	_task.add_theme_font_override("font", _title_font())
+	_task_panel.add_child(_task)
+	_root.add_child(_task_panel)
+	_task_panel.visible = false
 
 
 func _build_card() -> void:

@@ -63,6 +63,10 @@ static func blade() -> StandardMaterial3D:
 		return m)
 
 
+static func mail() -> StandardMaterial3D:
+	return _cached("mail", func(): return pbr("mail", Color(0.66, 0.66, 0.68), 1.0, 0.6, Vector3(5, 5, 5)))
+
+
 static func leather() -> StandardMaterial3D:
 	return _cached("leather", func(): return pbr("leather", Color(0.55, 0.40, 0.30), 0.0, 0.85, Vector3(2, 2, 2)))
 
@@ -92,6 +96,38 @@ static func visor_black() -> StandardMaterial3D:
 
 
 # --- primitive parts -------------------------------------------------------------
+
+## Surface of revolution around the Y axis from a profile of (radius, height) points,
+## bottom to top, with smooth analytic normals. Use a double-sided material with it.
+static func lathe(profile: PackedVector2Array, segments := 24) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := profile.size()
+	var normals: Array[Vector2] = []
+	for i in n:
+		var a := profile[maxi(i - 1, 0)]
+		var b := profile[mini(i + 1, n - 1)]
+		var t := (b - a).normalized()
+		normals.append(Vector2(t.y, -t.x))   # outward in the (radius, height) plane
+	for i in n - 1:
+		for j in segments:
+			var ring := [[i, j], [i, j + 1], [i + 1, j + 1], [i, j], [i + 1, j + 1], [i + 1, j]]
+			for v in ring:
+				var pi: int = v[0]
+				var ang := TAU * float(v[1]) / segments
+				var p := profile[pi]
+				var nn := normals[pi]
+				st.set_normal(Vector3(nn.x * cos(ang), nn.y, nn.x * sin(ang)).normalized())
+				st.set_uv(Vector2(float(v[1]) / segments, float(pi) / (n - 1)))
+				st.add_vertex(Vector3(p.x * cos(ang), p.y, p.x * sin(ang)))
+	return st.commit()
+
+
+static func two_sided(m: StandardMaterial3D) -> StandardMaterial3D:
+	var d := m.duplicate() as StandardMaterial3D
+	d.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return d
+
 
 static func part(parent: Node3D, mesh: Mesh, mat: Material, pos := Vector3.ZERO) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()

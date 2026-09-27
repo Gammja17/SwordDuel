@@ -4,17 +4,18 @@ extends CharacterBody3D
 ## Loop: hold a guard at guard distance (just outside the player's resting reach),
 ## then step in with a telegraphed windup, cut along one of its lines, and step back
 ## out. How it fights is set by a tier (see main.gd): windup/attack speed, which lines
-## it knows, how often it feints, chains a second cut, or punishes the player for
-## stepping into range. Against it the player can:
-##   - PARRY: swing into the attack       -> it staggers, wide open
-##   - BLOCK: just hold the blade in line -> no damage, but it keeps the pressure on
-##   - back off during the windup         -> the cut falls short
-##   - beat the guard: it covers the high line on the side of your blade; go low,
-##     switch sides faster than it follows, or bind and push through
+## it knows, how often it feints, chains a second cut, parries the player's cuts,
+## presses into a bind, or punishes the player for stepping into range.
+## Against it the player can:
+##   - PARRY: swing into the cut           -> it staggers, wide open
+##   - BLOCK: just hold the blade in line  -> no damage, but it keeps the pressure on
+##   - back off early in the windup        -> the cut falls short
+##   - win a BIND (combat.gd)              -> its blade is thrown aside
+## Swinging carelessly into it gets parried and answered.
 
 signal died
 
-enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
+enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD }
 
 const KnightScript := preload("res://knight.gd")
 const Armor := preload("res://armor.gd")
@@ -28,13 +29,15 @@ const REACH := SwordMesh.REACH
 const BLOCKED_FOLLOWUP := 0.25   # after being blocked (not parried), attack again this soon
 const STEP_IN_SPEED := 3.0
 const STEP_OUT_SPEED := 2.4
+const PARRY_TIME := 0.32
 
 # Poses are [grip, blade direction] in local space, -Z toward the player, right-side
 # versions; the left side mirrors X. Each cut is [cocked, impact, follow-through]. At
-# impact the blade is still on its own side — a cut from its right lands on the
-# player's LEFT shoulder before it ever crosses the middle — so the player has to read
-# the side to parry it; swinging the wrong way lets it through.
-const NEUTRAL := [Vector3(0.22, 1.50, -0.12), Vector3(0.25, 1.0, 0.30)]  # blade up over the shoulder
+# impact the blade is still on its own side (a cut from its right lands on the
+# player's LEFT shoulder before it crosses the middle), so the player has to read the
+# side to parry it; swinging the wrong way lets it through.
+const NEUTRAL := [Vector3(0.22, 1.50, -0.12), Vector3(0.25, 1.0, 0.30)]   # blade up over the shoulder
+const OPEN := [Vector3(0.25, 0.95, -0.20), Vector3(0.5, -0.6, -0.5)]      # blade low: practice target
 const LINES := {
 	"diag": [    # high diagonal cut onto the shoulder, then down across the body
 		[Vector3(0.30, 1.55, -0.08), Vector3(0.45, 0.85, 0.35)],
@@ -60,6 +63,7 @@ var display_name := ""
 var _t := {}          # tier parameters
 var _player: Node3D
 var _sword            # the player's Sword (untyped: read dynamically)
+var _drill := ""      # practice behaviour: "", "idle", "open", "attack", "bind"
 
 var _state: int = State.IDLE
 var _timer := 0.0
@@ -73,6 +77,13 @@ var _attack_hit := false
 var _entry_checked := false
 var _since_flinch := 99.0
 var _push := Vector3.ZERO
+var _parry_cd := 0.0
+var _parry_side := 1.0
+var _recent_cuts: Array[float] = []   # when the player's cuts landed on us (seconds)
+var _overswing_cd := 0.0
+var _clock := 0.0
+var _wants_bind := false
+var _bind_point_local := Vector3(0.0, 1.35, -1.0)
 
 var _knight
 var _grip := Vector3(0.22, 1.50, -0.12)
@@ -93,7 +104,7 @@ var blade_tip_vel := Vector3.ZERO
 
 
 func _ready() -> void:
-	collision_layer = 4       # opponent hurtbox — the player's blade looks for this
+	collision_layer = 4       # opponent hurtbox
 	collision_mask = 1 | 2    # arena (1) + player body (2)
 
 	var col := CollisionShape3D.new()
@@ -124,6 +135,16 @@ func begin() -> void:
 	_enter(State.APPROACH)
 
 
+## Practice behaviour (main's hands-on practice): "idle" stands, "open" stands with the
+## blade low, "attack" cuts slowly, "bind" closes in and waits to be bound.
+func set_drill(mode: String) -> void:
+	_drill = mode
+	if mode == "idle" or mode == "open":
+		_state = State.IDLE
+	elif _state == State.IDLE:
+		_enter(State.APPROACH)
+
+
 func get_blade_vel() -> Vector3:
 	return blade_tip_vel
 
@@ -140,6 +161,22 @@ func is_striking() -> bool:
 	return _state == State.ATTACK and not _attack_hit
 
 
+func is_parrying() -> bool:
+	return _state == State.PARRY
+
+
+func is_dead() -> bool:
+	return _state == State.DEAD
+
+
+func is_open() -> bool:
+	return _state == State.STAGGER or _state == State.RECOVER
+
+
+func tier_value(key: String, fallback: Variant) -> Variant:
+	return _t.get(key, fallback)
+
+
 ## combat.gd: our cut may land this frame.
 func can_cut() -> bool:
 	return is_striking()
@@ -148,18 +185,20 @@ func can_cut() -> bool:
 ## combat.gd: our cut reached the player.
 func land_cut(target: Node, point: Vector3) -> void:
 	_attack_hit = true
-	target.receive_cut(blade_tip_vel.length() * float(_t.get("damage", 1.0)), point, blade_tip_vel.normalized())
-
-
-func is_dead() -> bool:
-	return _state == State.DEAD
+	# Its cuts are always fast; cap the speed so each tier's "damage" really sets how
+	# many hits the player can take (roughly 6 / 5 / 4 from first to last).
+	var speed := minf(blade_tip_vel.length(), 14.0)
+	target.receive_cut(speed * float(_t.get("damage", 1.0)), point, blade_tip_vel.normalized())
 
 
 ## A cut from the player's sword landed.
 func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 	if _state == State.DEAD:
 		return
-	hp = maxf(hp - clampf(strength * 2.4, 6.0, 34.0), 0.0)
+	# Plate soaks light blows: only a fast, full cut does real damage.
+	var armor := float(_t.get("armor", 1.5))
+	hp = maxf(hp - clampf((strength - armor) * 2.8, 3.0, 34.0), 0.0)
+	_recent_cuts.append(_clock)
 	_knight.flash()
 	Fx.cut_spray(get_tree().current_scene, pos, swing_dir)
 	Sfx.play("cut", pos, 0.0)
@@ -167,29 +206,40 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 	if hp <= 0.0:
 		_die()
 		return
-	# A short flinch if it wasn't mid-attack; not again right away, so no stun-lock.
-	if not is_attacking() and _state != State.STAGGER and _since_flinch > 1.2:
+	# A short flinch from a strong cut if it wasn't mid-attack; not again right away,
+	# so no stun-lock, and light blows don't stop it at all.
+	if strength >= float(_t.get("flinch_speed", 7.0)) and not is_attacking() 			and _state != State.STAGGER and _state != State.BIND and _since_flinch > 1.2:
 		_since_flinch = 0.0
 		_enter(State.STAGGER)
 		_timer = 0.3
 
 
 ## Our blade met the player's.
+##   - we parried their cut: answer at once (riposte)
 ##   - they swung into our cut or windup (parry): we stagger, wide open
-##   - they only held the line against our cut (block): we come again quickly
-##   - they cut into our guard: some fighters answer at once (riposte)
-func on_blade_clashed(_pos: Vector3, parried: bool) -> void:
-	if parried:
+##   - they only held the line against our cut (block): come again quickly, or press
+##     into a bind
+##   - they cut into our guard: some fighters answer at once or bind
+func on_blade_clashed(_pos: Vector3, player_parried: bool, i_parried: bool) -> void:
+	if i_parried:
+		_start_windup(0.5, 0.0)
+	elif player_parried:
 		_in_combo = false
 		_enter(State.STAGGER)
 		_push = global_transform.basis.z * 1.6   # knocked back a step
 	elif is_striking():
 		_in_combo = false
+		if randf() < float(_t.get("bind_press", 0.0)):
+			_wants_bind = true
 		_enter(State.POISE)
 		_timer = BLOCKED_FOLLOWUP
-	elif not is_attacking() and _state != State.STAGGER:
-		if randf() < float(_t.get("riposte", 0.0)):
+	elif not is_attacking() and _state != State.STAGGER and _drill == "":
+		var r := randf()
+		var riposte := float(_t.get("riposte", 0.0))
+		if r < riposte:
 			_start_windup(0.6, 0.0)
+		elif r < riposte + float(_t.get("bind_press", 0.0)) * 0.5:
+			_wants_bind = true
 
 
 func guard_broken() -> void:
@@ -199,8 +249,53 @@ func guard_broken() -> void:
 	_knight.flash()
 
 
+# --- bind (combat.gd drives it) ------------------------------------------------------
+
+func consume_bind_request() -> bool:
+	var w := _wants_bind
+	_wants_bind = false
+	return w
+
+
+func enter_bind() -> void:
+	_wants_bind = false
+	_in_combo = false
+	_state = State.BIND
+
+
+func set_bind_point(world_point: Vector3) -> void:
+	_bind_point_local = to_local(world_point)
+
+
+## The player won the bind: our blade is thrown aside.
+func bind_lost(side: float) -> void:
+	_side = side
+	_enter(State.STAGGER)
+	_timer = float(_t.get("stagger", 0.8)) + 0.15
+	_push = global_transform.basis.z * 1.2
+
+
+## We won the bind: the player's blade is shoved aside, cut straight from the bind.
+func bind_won() -> void:
+	_start_windup(0.3, 0.0)
+
+
+## The bind came apart; if the player pulled out, some fighters cut after them.
+func bind_released(player_pulled_out: bool) -> void:
+	if player_pulled_out and randf() < float(_t.get("exit_cut", 0.0)):
+		_start_windup(0.35, 0.0)
+	else:
+		_enter(State.POISE)
+		_push = global_transform.basis.z * 0.8
+
+
+# --- behaviour ----------------------------------------------------------------------
+
 func _physics_process(delta: float) -> void:
 	_since_flinch += delta
+	_parry_cd -= delta
+	_overswing_cd -= delta
+	_clock += delta
 	if _state == State.DEAD:
 		velocity = Vector3(0.0, velocity.y - GRAVITY * delta, 0.0)
 		move_and_slide()
@@ -226,6 +321,7 @@ func _physics_process(delta: float) -> void:
 	if _step_dist > 0.75:
 		_step_dist = 0.0
 		Sfx.play("step", global_position, -9.0)
+		Sfx.play("armor", global_position + Vector3(0, 1.0, 0), -14.0)
 	_update_blade(delta)
 
 
@@ -245,8 +341,11 @@ func _run_state(delta: float) -> void:
 		_state = State.IDLE  # won: stand down, blade raised
 		return
 
+	_watch_for_player_cut()
+	_watch_for_overswing()
+
 	match _state:
-		State.IDLE:
+		State.IDLE, State.BIND:
 			pass
 		State.APPROACH:
 			if dist > POISE_RANGE:
@@ -260,7 +359,7 @@ func _run_state(delta: float) -> void:
 				# The player stepped into range: some fighters strike first.
 				if not _entry_checked:
 					_entry_checked = true
-					if randf() < float(_t.get("punish", 0.0)):
+					if _drill == "" and randf() < float(_t.get("punish", 0.0)):
 						_start_windup(0.75, 0.0)
 			else:
 				_entry_checked = false
@@ -268,13 +367,13 @@ func _run_state(delta: float) -> void:
 			if _state == State.POISE and dist < POISE_RANGE - 0.3 and _timer > BLOCKED_FOLLOWUP:
 				_move(-STEP_OUT_SPEED * 0.6)
 			if _state == State.POISE and _timer <= 0.0:
-				if randf() < float(_t.get("attack_prob", 0.7)):
+				if _drill != "bind" and randf() < float(_t.get("attack_prob", 0.7)):
 					_start_windup(1.0, 0.0)
 				else:
 					_timer = randf_range(0.4, 0.9)
 		State.WINDUP:
 			# Step in during the first part of the windup, then plant the feet for the
-			# cut — so backing off at the right moment makes it fall short.
+			# cut, so backing off at the right moment makes it fall short.
 			if dist > ATTACK_RANGE and _timer > _windup_total * 0.4:
 				_move(STEP_IN_SPEED)
 			if _feint_planned and not _feinted and _timer < _windup_total * 0.45:
@@ -300,6 +399,54 @@ func _run_state(delta: float) -> void:
 		State.STAGGER:
 			if _timer <= 0.0:
 				_enter(State.POISE)
+		State.PARRY:
+			if _timer <= 0.0:
+				_enter(State.POISE)
+
+
+## When the player's blade comes at us in a real swing, better fighters snap their
+## guard across its path (a parry of our own). Decided once per swing.
+func _watch_for_player_cut() -> void:
+	if _sword == null or _parry_cd > 0.0 or _drill != "":
+		return
+	if not (_state == State.POISE or _state == State.RECOVER or _state == State.APPROACH):
+		return
+	if not _sword.is_real_swing(3.0, 0.18):
+		return
+	var chest := global_position + Vector3(0.0, 1.25, 0.0)
+	var to_me: Vector3 = chest - _sword.tip
+	if to_me.length() > 1.35 or _sword.tip_vel.dot(to_me) <= 0.0:
+		return
+	# It reads a rhythm: every cut it took in the last few seconds makes the next parry
+	# likelier, so flailing gets caught.
+	while not _recent_cuts.is_empty() and _clock - _recent_cuts[0] > 2.5:
+		_recent_cuts.pop_front()
+	var chance := float(_t.get("parry", 0.0)) + 0.22 * _recent_cuts.size()
+	if _recent_cuts.size() > 0:
+		chance = maxf(chance, 0.3)
+	_parry_cd = 0.45
+	if randf() < minf(chance, 0.9):
+		var x: float = to_local(_sword.tip).x
+		_parry_side = 1.0 if x >= 0.0 else -1.0
+		_state = State.PARRY
+		_timer = PARRY_TIME
+
+
+## A long swing that carried the player's blade far off to one side leaves them open:
+## good fighters cut into that opening at once.
+func _watch_for_overswing() -> void:
+	if _sword == null or _drill != "" or _overswing_cd > 0.0:
+		return
+	if not (_state == State.POISE or _state == State.APPROACH):
+		return
+	if _sword.swing_arc < 0.6:
+		return
+	var tip_local: Vector3 = to_local(_sword.tip)
+	if absf(tip_local.x) < 0.75:
+		return
+	_overswing_cd = 0.9
+	if randf() < float(_t.get("punish", 0.0)):
+		_start_windup(0.6, 0.0)
 
 
 func _enter(state: int) -> void:
@@ -359,6 +506,12 @@ func _target_pose() -> Array:
 			return _pose_of(line[0], _side)
 		State.STAGGER:
 			return [Vector3(0.28 * _side, 1.10, -0.12), Vector3(0.95 * _side, -0.25, 0.15).normalized()]
+		State.PARRY:
+			# Blade snapped across the incoming cut, on the side it comes from.
+			return [Vector3(0.14 * _parry_side, 1.22, -0.36), Vector3(0.6 * _parry_side, 0.75, -0.3).normalized()]
+		State.BIND:
+			var grip := Vector3(0.10, 1.25, -0.40)
+			return [grip, (_bind_point_local - grip).normalized()]
 		State.POISE, State.RECOVER:
 			# Upright guard in front of the body, leaning toward the side of the player's
 			# blade: a barrier over the high line, not a probe that reaches out to it.
@@ -367,6 +520,8 @@ func _target_pose() -> Array:
 				s = clampf(to_local(_sword.get_tip_pos()).x / 0.5, -1.0, 1.0)
 			return [Vector3(0.08 + 0.16 * s, 1.00, -0.34), Vector3(0.28 * s, 1.0, -0.12).normalized()]
 		_:
+			if _drill == "open":
+				return _pose_of(OPEN, 1.0)
 			return _pose_of(NEUTRAL, 1.0)
 
 
@@ -392,6 +547,10 @@ func _lerp_rate() -> float:
 			return float(_t.get("guard_track", 6.0)) * 0.55
 		State.STAGGER:
 			return 7.0
+		State.PARRY:
+			return 28.0
+		State.BIND:
+			return 20.0
 		_:
 			return 5.0
 

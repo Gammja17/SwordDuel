@@ -1,9 +1,9 @@
 extends CharacterBody3D
 ## The duelist you play, seen through their own eyes.
-## Locked on to the opponent: the body always faces it, W/S close or open the distance
-## and A/D circle. The MOUSE moves the sword: it steers the blade's point across a
-## plane in front of you, both hands follow on the grip, and the speed of the tip is
-## what cuts (see sword.gd).
+## Locked on to the opponent: the body always faces it, W steps in, S steps back
+## (slower) and A/D circle. The MOUSE moves the sword: it drags a target across a plane
+## in front of you and the blade's point follows it with weight (limited acceleration
+## and speed), both hands on the grip. The speed of the tip is what cuts (sword.gd).
 
 signal hurt(amount: float)
 signal died
@@ -13,8 +13,9 @@ const ArmScript := preload("res://arm.gd")
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 
-const SPEED := 3.2          # closing / opening distance (W/S)
-const STRAFE_SPEED := 2.0   # circling while locked on (A/D): too slow to outrun a swing
+const SPEED := 3.2          # stepping in (W)
+const BACK_SPEED := 2.1     # stepping back (S): slower, so distance alone rarely saves you
+const STRAFE_SPEED := 2.0   # circling while locked on (A/D)
 const GRAVITY := 18.0
 
 const EYE := Vector3(0.0, 1.62, 0.0)
@@ -32,24 +33,48 @@ const AIM_MIN := Vector2(-0.85, 0.55)
 const AIM_MAX := Vector2(0.85, 2.05)
 const AIM_REST := Vector2(0.0, 1.45)   # point toward the opponent's face
 
+# Weight of the sword: the point chases the mouse on a spring whose acceleration and
+# speed are capped. A real cut needs a wind-up, and a hard swing can't reverse at once.
+const AIM_STIFFNESS := 220.0
+const AIM_DAMPING := 25.0
+const AIM_MAX_ACCEL := 55.0
+const AIM_MAX_SPEED := 7.5
+
+# Breath: every full swing costs some. Out of breath, the sword feels heavy (slower to
+# accelerate, lower top speed, so weaker cuts) until you stop swinging for a moment.
+const BREATH_MAX := 100.0
+const SWING_COST := 22.0
+const BREATH_REGEN := 35.0          # per second
+const BREATH_REGEN_DELAY := 0.5     # after the last swing
+const TIRED_BELOW := 35.0
+
 # Guard (posture): every plain BLOCK fills it; parries don't. When it fills, the guard
 # breaks — blade knocked low, control sluggish — so blocking alone can't hold forever.
 const POSTURE_MAX := 100.0
 const BLOCK_POSTURE := 34.0           # three blocks in a row break the guard
+const PARRIED_POSTURE := 25.0         # having our own cut parried also shakes us
 const POSTURE_RECOVER_DELAY := 1.0    # seconds without blocking before it starts to drain
 const POSTURE_RECOVER_RATE := 25.0    # per second
 
 var sword: Node3D
 var target: Node3D   # lock-on target, set by main
 var active := false  # main turns this on when the duel starts
+var practice := false  # in the practice bout, hits are shown but cost no health
 var alive := true
 var hp := 100.0
 var hurt_flash := 0.0
 var posture := 0.0
+var breath := BREATH_MAX
+var in_bind := false
 
 var _aim := AIM_REST
+var _aim_target := AIM_REST
+var _aim_vel := Vector2.ZERO
+var _bind_push := 0.0
 var _deflect_timer := 0.0   # after a clash the blade bounces and control is damped
 var _since_block := 0.0
+var _since_swing := 0.0
+var _swinging := false
 var _cam: Camera3D
 var _arm_r
 var _arm_l
@@ -60,7 +85,7 @@ var _step_dist := 0.0
 
 
 func _ready() -> void:
-	collision_layer = 2       # player hurtbox — the opponent's blade looks for this
+	collision_layer = 2       # player hurtbox
 	collision_mask = 1 | 4    # collide with the arena (1) and the opponent's body (4)
 
 	var col := CollisionShape3D.new()
@@ -78,9 +103,9 @@ func _ready() -> void:
 	add_child(_cam)
 	_cam.current = true
 
-	# Our own arms, in mail sleeves with plate forearms and gauntlets.
-	_arm_r = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.dark_steel(), Armor.steel(), Armor.dark_steel(), false)
-	_arm_l = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.dark_steel(), Armor.steel(), Armor.dark_steel(), false)
+	# Our own arms: mail sleeves, plate forearms, gauntlets.
+	_arm_r = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.mail(), Armor.steel(), Armor.dark_steel(), false)
+	_arm_l = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.mail(), Armor.steel(), Armor.dark_steel(), false)
 
 	sword = SwordScript.new()
 	sword.name = "Sword"
@@ -96,9 +121,12 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := event as InputEventMouseMotion
+		if in_bind:
+			_bind_push += mm.relative.x * AIM_SENS   # sideways pressure on the locked blades
+			return
 		var damp := 0.25 if _deflect_timer > 0.0 else 1.0
-		_aim.x = clampf(_aim.x + mm.relative.x * AIM_SENS * damp, AIM_MIN.x, AIM_MAX.x)
-		_aim.y = clampf(_aim.y - mm.relative.y * AIM_SENS * damp, AIM_MIN.y, AIM_MAX.y)
+		_aim_target.x = clampf(_aim_target.x + mm.relative.x * AIM_SENS * damp, AIM_MIN.x, AIM_MAX.x)
+		_aim_target.y = clampf(_aim_target.y - mm.relative.y * AIM_SENS * damp, AIM_MIN.y, AIM_MAX.y)
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		# Browsers only grant pointer lock from a click, and release it on ESC themselves.
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -106,26 +134,72 @@ func _input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
-## Called by the sword on a clash: kick the aim (blade bounces) and damp control briefly.
+## Called on a clash: kick the blade (it bounces) and damp control briefly.
 func deflect(kick: Vector2, duration: float = 0.18) -> void:
-	_aim.x = clampf(_aim.x + kick.x, AIM_MIN.x, AIM_MAX.x)
-	_aim.y = clampf(_aim.y + kick.y, AIM_MIN.y, AIM_MAX.y)
+	_aim = _clamp_aim(_aim + kick)
+	_aim_target = _clamp_aim(_aim_target + kick)
+	_aim_vel = kick * 4.0
 	_deflect_timer = duration
 	add_trauma(0.18)
 
 
-## Called by the sword when we only BLOCKED an attack (held the line, didn't swing into
-## it). Fills the guard meter; returns true if that broke the guard.
+## We only BLOCKED a cut (held the line, didn't swing into it). Fills the guard meter;
+## returns true if that broke the guard.
 func absorb_block(h: float) -> bool:
-	posture += BLOCK_POSTURE
+	if _add_posture(BLOCK_POSTURE, h):
+		return true
+	deflect(Vector2(h * 0.45, 0.25), 0.35)    # knocked open, but still in the fight
+	return false
+
+
+## The opponent parried our cut: our blade is thrown wide. Returns true if the guard broke.
+func get_parried(h: float) -> bool:
+	if _add_posture(PARRIED_POSTURE, h):
+		return true
+	deflect(Vector2(h * 0.75, -0.35), 0.5)
+	add_trauma(0.2)
+	return false
+
+
+func _add_posture(amount: float, h: float) -> bool:
+	posture += amount
 	_since_block = 0.0
 	if posture >= POSTURE_MAX:
 		posture = 0.0
 		deflect(Vector2(h * 0.8, -0.7), 0.9)  # blade thrown low; slow to bring back
 		add_trauma(0.35)
 		return true
-	deflect(Vector2(h * 0.45, 0.25), 0.35)    # knocked open, but still in the fight
 	return false
+
+
+# --- bind (combat.gd drives it) -----------------------------------------------------
+
+func enter_bind() -> void:
+	in_bind = true
+	_bind_push = 0.0
+	_aim_vel = Vector2.ZERO
+
+
+func exit_bind() -> void:
+	in_bind = false
+	_aim_target = _aim
+
+
+## Sideways mouse pressure since the last call (aim units, + = to our right).
+func take_bind_push() -> float:
+	var p := _bind_push
+	_bind_push = 0.0
+	return p
+
+
+## While bound, the blade is held where the two swords cross.
+func hold_blade_at(aim: Vector2) -> void:
+	_aim = _clamp_aim(_aim.lerp(aim, 0.4))
+	_aim_target = _aim
+
+
+func wants_disengage() -> bool:
+	return active and Input.is_action_pressed("move_back")
 
 
 ## Called by the opponent's blade when a cut lands on us.
@@ -133,7 +207,8 @@ func receive_cut(strength: float, _pos: Vector3, _dir: Vector3) -> void:
 	if not alive:
 		return
 	var dmg := clampf(strength * 2.4, 6.0, 34.0)
-	hp = maxf(hp - dmg, 0.0)
+	if not practice:
+		hp = maxf(hp - dmg, 0.0)
 	hurt_flash = 1.0
 	add_trauma(0.6)
 	Sfx.play_flat("hurt", -3.0)
@@ -150,6 +225,7 @@ func add_trauma(amount: float) -> void:
 func _die() -> void:
 	alive = false
 	active = false
+	in_bind = false
 	died.emit()
 	var tw := create_tween().set_parallel(true)
 	tw.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -171,7 +247,7 @@ func _physics_process(delta: float) -> void:
 		_face_target()
 
 	var input_dir := Vector3.ZERO
-	if active:
+	if active and not in_bind:
 		if Input.is_action_pressed("move_forward"):
 			input_dir.z -= 1.0
 		if Input.is_action_pressed("move_back"):
@@ -183,7 +259,7 @@ func _physics_process(delta: float) -> void:
 	# Relative to our facing: W/S toward/away from the target, A/D circle around it.
 	var local := input_dir.normalized()
 	local.x *= STRAFE_SPEED
-	local.z *= SPEED
+	local.z *= SPEED if local.z < 0.0 else BACK_SPEED
 	var move := global_transform.basis * local
 	velocity.x = move.x
 	velocity.z = move.z
@@ -202,7 +278,11 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		return
 
-	# Sword: the point goes where the mouse steers it; the hands follow on a sphere
+	_update_breath(delta)
+	if not in_bind:
+		_step_aim(delta)
+
+	# Sword: the point goes where it has been steered; the hands follow on a sphere
 	# around the chest, so reaching high/wide also moves the arms.
 	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z)
 	var grip := CHEST + (aim_pt - CHEST).normalized() * GRIP_RADIUS
@@ -213,6 +293,49 @@ func _physics_process(delta: float) -> void:
 	_arm_l.pose(SHOULDER_L, grip - dir * SwordMesh.LEFT_HAND, Vector3(-0.7, -0.7, 0.1), blade_basis)
 
 	_update_camera(delta, moving)
+
+
+## Each full swing (a real cut's speed and travel) costs breath once.
+func _update_breath(delta: float) -> void:
+	var swinging: bool = sword.is_real_swing(SwordScript.CUT_THRESHOLD, SwordScript.CUT_ARC)
+	if swinging and not _swinging:
+		breath = maxf(breath - SWING_COST, 0.0)
+	if swinging or sword.swing_speed > 2.0:
+		_since_swing = 0.0
+	else:
+		_since_swing += delta
+	_swinging = swinging
+	if _since_swing > BREATH_REGEN_DELAY:
+		breath = minf(breath + BREATH_REGEN * delta, BREATH_MAX)
+
+
+## How heavy the sword feels: 1 when rested, down to 0.5 when out of breath.
+func _strength() -> float:
+	if breath >= TIRED_BELOW:
+		return 1.0
+	return lerpf(0.5, 1.0, breath / TIRED_BELOW)
+
+
+## The blade's point chases the mouse target with capped acceleration and speed.
+func _step_aim(delta: float) -> void:
+	var k := _strength()
+	var acc := (_aim_target - _aim) * AIM_STIFFNESS - _aim_vel * AIM_DAMPING
+	if acc.length() > AIM_MAX_ACCEL * k:
+		acc = acc.normalized() * AIM_MAX_ACCEL * k
+	_aim_vel += acc * delta
+	if _aim_vel.length() > AIM_MAX_SPEED * k:
+		_aim_vel = _aim_vel.normalized() * AIM_MAX_SPEED * k
+	var next := _aim + _aim_vel * delta
+	var clamped := _clamp_aim(next)
+	if clamped.x != next.x:
+		_aim_vel.x = 0.0
+	if clamped.y != next.y:
+		_aim_vel.y = 0.0
+	_aim = clamped
+
+
+func _clamp_aim(a: Vector2) -> Vector2:
+	return Vector2(clampf(a.x, AIM_MIN.x, AIM_MAX.x), clampf(a.y, AIM_MIN.y, AIM_MAX.y))
 
 
 func _face_target() -> void:
