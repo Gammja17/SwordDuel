@@ -242,8 +242,12 @@ func is_guarding() -> bool:
 	return _guard_held and not in_bind
 
 
+## The parry window is tighter against better fighters (their tier's parry_window).
 func is_parry_window() -> bool:
-	return _parry_t >= 0.0 and _parry_t <= PARRY_WINDOW
+	var window := PARRY_WINDOW
+	if target != null and target.has_method("tier_value"):
+		window = float(target.tier_value("parry_window", PARRY_WINDOW))
+	return _parry_t >= 0.0 and _parry_t <= window
 
 
 func dodged_within(ms: int) -> bool:

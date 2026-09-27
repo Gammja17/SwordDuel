@@ -108,9 +108,11 @@ Sizes are Poly Haven's listed real-world dimensions (width x depth x height; the
 
 Files are unmodified and keep the pack's own names. `Knight.glb` already embeds `knight_texture.png`; the
 loose copy in `weapons/` is there because the weapon `.gltf` files load it from their own folder.
-See `characters/knight/INSPECT.md` for the rig, animations and sizes.
+See `characters/knight/INSPECT.md` and `characters/body/INSPECT.md` for the rigs, animations and sizes.
 
 | Files | Original asset | Author | Source | License |
 |---|---|---|---|---|
 | `knight/Knight.glb`, `knight/knight_texture.png`, `knight/LICENSE.txt` | KayKit Character Pack: Adventurers 1.0, Knight (`Characters/gltf/Knight.glb`: rigged low-poly knight with 76 animations, swords, shields, helmet and cape as bone-attached nodes) | Kay Lousberg (KayKit) | https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 (also https://kaylousberg.itch.io/kaykit-adventurers) | CC0 |
 | `knight/weapons/sword_1handed.gltf` + `.bin`, `sword_2handed.gltf` + `.bin`, `sword_2handed_color.gltf` + `.bin`, `knight/weapons/knight_texture.png` | Same pack (`Assets/gltf/`: one-handed sword, two-handed sword, coloured two-handed sword) | Kay Lousberg (KayKit) | same as above | CC0 |
+| `body/UAL1_Standard.glb`, `body/LICENSE.txt` | Universal Animation Library, free Standard version v3.0 (`Unreal-Godot/UAL1_Standard.glb`, no root motion build: realistic-proportion 1.83 m mannequin on a 65-joint humanoid rig with 43 animations; `License.txt` renamed) | Quaternius | https://quaternius.itch.io/universal-animation-library (also https://quaternius.com) | CC0 |
+| `body/UAL2_Standard.glb` | Universal Animation Library 2, free Standard version v2.1 (`Unreal-Godot/UAL2_Standard.glb`, no root motion build: same mannequin and rig with 43 more animations, including sword combos and block) | Quaternius | https://quaternius.itch.io/universal-animation-library-2 (also https://quaternius.com) | CC0 |

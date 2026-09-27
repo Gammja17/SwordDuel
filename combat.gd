@@ -51,6 +51,7 @@ func _physics_process(delta: float) -> void:
 		return
 	var ps = player.sword
 	_rearm -= delta
+	opponent.refresh_blade(delta)   # the animated sword, after this frame's animation
 	if not player.alive or opponent.is_dead():
 		if is_bound():
 			_end_bind("apart")
@@ -83,10 +84,14 @@ func _physics_process(delta: float) -> void:
 	ps.release_bind()
 
 	# Our cut: only a real swing (not a still blade carried by footwork) cuts.
-	if ps.can_cut():
+	# A cut into its parry is parried; while it dodges, cuts pass through.
+	if ps.can_cut() and not opponent.is_dodging():
 		var hit := _swept_body(ps.prev_base, ps.prev_tip, ps.base, ps.tip, opponent.global_position, 0.32)
 		if hit.found:
-			ps.try_cut(opponent, hit.point)
+			if opponent.is_parrying():
+				ps.clash(hit.point, opponent, opponent.blade_tip_vel)
+			else:
+				ps.try_cut(opponent, hit.point)
 
 	# Its cut (a well-timed dodge makes it pass through). Holding guard (right mouse)
 	# turns a cut that reaches us into a parry if it was just pressed, else a block.
