@@ -48,6 +48,19 @@ const BREATH_REGEN := 35.0          # per second
 const BREATH_REGEN_DELAY := 0.5     # after the last swing
 const TIRED_BELOW := 35.0
 
+# Dodge (Space): a quick step in the held direction (back if none), briefly untouchable.
+const DODGE_SPEED := 6.5
+const DODGE_TIME := 0.3
+const DODGE_IFRAMES := Vector2(0.02, 0.22)   # untouchable between these times into the dodge
+const DODGE_COST := 25.0
+const DODGE_COOLDOWN := 0.55
+
+# Right mouse: the blade snaps toward the incoming blade. Its first moments are a timed
+# PARRY window; holding it after that is just a BLOCK (fills the guard meter).
+const PARRY_WINDOW := 0.2
+const GUARD_COST := 6.0
+const GUARD_SNAP := 2.2	  # how much faster the blade moves while guarding
+
 # Guard (posture): every plain BLOCK fills it; parries don't. When it fills, the guard
 # breaks — blade knocked low, control sluggish — so blocking alone can't hold forever.
 const POSTURE_MAX := 100.0
@@ -75,6 +88,12 @@ var _deflect_timer := 0.0   # after a clash the blade bounces and control is dam
 var _since_block := 0.0
 var _since_swing := 0.0
 var _swinging := false
+var _dodge_t := -1.0		   # time into the current dodge; < 0 when not dodging
+var _dodge_dir := Vector3.ZERO
+var _dodge_cd := 0.0
+var _last_dodge_ms := -100000
+var _guard_held := false
+var _parry_t := -1.0		   # time since the right button went down; < 0 when released
 var _cam: Camera3D
 var _arm_r
 var _arm_l
@@ -130,6 +149,19 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		# Browsers only grant pointer lock from a click, and release it on ESC themselves.
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
+		if event.pressed and not in_bind:
+			_guard_held = true
+			_parry_t = 0.0
+			breath = maxf(breath - GUARD_COST, 0.0)
+		elif not event.pressed:
+			_guard_held = false
+			_parry_t = -1.0
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.is_echo() \
+			and (event as InputEventKey).physical_keycode == KEY_SPACE:
+		_try_dodge()
+		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -202,6 +234,45 @@ func wants_disengage() -> bool:
 	return active and Input.is_action_pressed("move_back")
 
 
+func is_invulnerable() -> bool:
+	return _dodge_t >= DODGE_IFRAMES.x and _dodge_t <= DODGE_IFRAMES.y
+
+
+func is_guarding() -> bool:
+	return _guard_held and not in_bind
+
+
+func is_parry_window() -> bool:
+	return _parry_t >= 0.0 and _parry_t <= PARRY_WINDOW
+
+
+func dodged_within(ms: int) -> bool:
+	return Time.get_ticks_msec() - _last_dodge_ms <= ms
+
+
+func _try_dodge() -> void:
+	if in_bind or _dodge_t >= 0.0 or _dodge_cd > 0.0 or breath < 10.0:
+		return
+	var dir := Vector3.ZERO
+	if Input.is_action_pressed("move_forward"):
+		dir.z -= 1.0
+	if Input.is_action_pressed("move_back"):
+		dir.z += 1.0
+	if Input.is_action_pressed("move_left"):
+		dir.x -= 1.0
+	if Input.is_action_pressed("move_right"):
+		dir.x += 1.0
+	if dir == Vector3.ZERO:
+		dir = Vector3(0.0, 0.0, 1.0)   # no direction held: hop back
+	_dodge_dir = dir.normalized()
+	_dodge_t = 0.0
+	_dodge_cd = DODGE_COOLDOWN
+	_last_dodge_ms = Time.get_ticks_msec()
+	breath = maxf(breath - DODGE_COST, 0.0)
+	Sfx.play_flat("step", -4.0)
+	Sfx.play_flat("armor", -8.0)
+
+
 ## Called by the opponent's blade when a cut lands on us.
 func receive_cut(strength: float, _pos: Vector3, _dir: Vector3) -> void:
 	if not alive:
@@ -240,6 +311,9 @@ func _physics_process(delta: float) -> void:
 	if hurt_flash > 0.0:
 		hurt_flash = maxf(hurt_flash - delta * 1.6, 0.0)
 	_since_block += delta
+	_dodge_cd -= delta
+	if _parry_t >= 0.0:
+		_parry_t += delta
 	if _since_block > POSTURE_RECOVER_DELAY and posture > 0.0:
 		posture = maxf(posture - POSTURE_RECOVER_RATE * delta, 0.0)
 
@@ -261,6 +335,13 @@ func _physics_process(delta: float) -> void:
 	local.x *= STRAFE_SPEED
 	local.z *= SPEED if local.z < 0.0 else BACK_SPEED
 	var move := global_transform.basis * local
+	if _dodge_t >= 0.0:
+		# A dodge overrides walking: fast at first, easing off.
+		_dodge_t += delta
+		var k := 1.0 - clampf(_dodge_t / DODGE_TIME, 0.0, 1.0)
+		move = global_transform.basis * _dodge_dir * DODGE_SPEED * (0.35 + 0.65 * k)
+		if _dodge_t >= DODGE_TIME:
+			_dodge_t = -1.0
 	velocity.x = move.x
 	velocity.z = move.z
 	if is_on_floor():
@@ -279,6 +360,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_update_breath(delta)
+	if _guard_held and not in_bind:
+		_track_incoming_blade()
 	if not in_bind:
 		_step_aim(delta)
 
@@ -309,11 +392,20 @@ func _update_breath(delta: float) -> void:
 		breath = minf(breath + BREATH_REGEN * delta, BREATH_MAX)
 
 
-## How heavy the sword feels: 1 when rested, down to 0.5 when out of breath.
+## How heavy the sword feels: 1 when rested, down to 0.5 when out of breath; guarding
+## snaps the blade faster.
 func _strength() -> float:
-	if breath >= TIRED_BELOW:
-		return 1.0
-	return lerpf(0.5, 1.0, breath / TIRED_BELOW)
+	var k := 1.0 if breath >= TIRED_BELOW else lerpf(0.5, 1.0, breath / TIRED_BELOW)
+	return k * (GUARD_SNAP if _guard_held else 1.0)
+
+
+## While guarding, the blade goes to meet the opponent's blade: aim at its middle.
+func _track_incoming_blade() -> void:
+	if target == null or not target.has_method("get_blade_vel"):
+		return
+	var mid: Vector3 = (target.get("blade_base") + target.get("blade_tip")) * 0.5
+	var local := to_local(mid)
+	_aim_target = _clamp_aim(Vector2(local.x, local.y))
 
 
 ## The blade's point chases the mouse target with capped acceleration and speed.
@@ -365,7 +457,11 @@ func _update_camera(delta: float, moving: float) -> void:
 	_bob += delta * moving * 2.6
 	_cam.position = EYE + Vector3(cos(_bob) * 0.010 * bob_amount, absf(sin(_bob)) * 0.018 * bob_amount, 0.0) \
 		+ Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * 0.03 * shake
+	var roll := 0.0
+	if _dodge_t >= 0.0:
+		roll = -_dodge_dir.x * 0.12 * sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)
+		_cam.position.y -= 0.08 * sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)
 	_cam.rotation = Vector3(
 		_pitch + sway_pitch + randf_range(-1.0, 1.0) * 0.03 * shake,
 		sway_yaw + randf_range(-1.0, 1.0) * 0.03 * shake,
-		randf_range(-1.0, 1.0) * 0.02 * shake)
+		roll + randf_range(-1.0, 1.0) * 0.02 * shake)

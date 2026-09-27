@@ -14,6 +14,7 @@ extends CharacterBody3D
 ## Swinging carelessly into it gets parried and answered.
 
 signal died
+signal attack_whiffed   # a cut ended without landing (dodged, fell short)
 
 enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD }
 
@@ -390,6 +391,8 @@ func _run_state(delta: float) -> void:
 					_start_windup(0.55, -_side)
 				else:
 					_in_combo = false
+					if not _attack_hit:
+						attack_whiffed.emit()
 					_enter(State.RECOVER)
 		State.RECOVER:
 			if dist < POISE_RANGE:

@@ -136,7 +136,10 @@ func clash(point: Vector3, opp: Node, opp_vel: Vector3) -> String:
 	var they_parried: bool = opp != null and opp.has_method("is_parrying") and opp.is_parrying()
 	var attacked: bool = opp != null and opp.has_method("is_attacking") and opp.is_attacking()
 	var striking: bool = opp != null and opp.has_method("is_striking") and opp.is_striking()
-	var parried := not they_parried and attacked and is_real_swing(PARRY_SPEED, PARRY_ARC)
+	# A parry: swinging into it, or pressing guard just before it lands.
+	var p := get_parent()
+	var timed: bool = p != null and p.has_method("is_parry_window") and p.is_parry_window()
+	var parried := not they_parried and attacked and (is_real_swing(PARRY_SPEED, PARRY_ARC) or timed)
 	var blocked := not they_parried and striking and not parried
 	var result := "CLANG!"
 	if they_parried:
@@ -146,7 +149,6 @@ func clash(point: Vector3, opp: Node, opp_vel: Vector3) -> String:
 	elif blocked:
 		result = "BLOCKED"
 
-	var p := get_parent()
 	if p is Node3D and p.has_method("deflect"):
 		var right := (p as Node3D).global_transform.basis.x
 		var h: float

@@ -13,19 +13,51 @@ var _next2d := 0
 var _ambience: AudioStreamPlayer
 
 
+## Volume channels, each 0..1 (linear). Effects and the wind ambience have their own
+## buses under Master so the settings panel can set them separately.
+const BUSES := ["Master", "SFX", "Ambience"]
+const DEFAULT_VOLUME := {"Master": 0.5, "SFX": 0.8, "Ambience": 0.5}
+
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	for bus in ["SFX", "Ambience"]:
+		if AudioServer.get_bus_index(bus) == -1:
+			AudioServer.add_bus()
+			var idx := AudioServer.bus_count - 1
+			AudioServer.set_bus_name(idx, bus)
+			AudioServer.set_bus_send(idx, "Master")
+	for bus in BUSES:
+		set_volume(bus, DEFAULT_VOLUME[bus])
 	_scan()
 	for i in 16:
 		var p := AudioStreamPlayer3D.new()
 		p.unit_size = 3.0
 		p.max_distance = 40.0
+		p.bus = "SFX"
 		add_child(p)
 		_pool3d.append(p)
 	for i in 6:
 		var q := AudioStreamPlayer.new()
+		q.bus = "SFX"
 		add_child(q)
 		_pool2d.append(q)
+
+
+func set_volume(bus: String, linear: float) -> void:
+	var idx := AudioServer.get_bus_index(bus)
+	if idx == -1:
+		return
+	linear = clampf(linear, 0.0, 1.0)
+	AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(linear, 0.0001)))
+	AudioServer.set_bus_mute(idx, linear <= 0.001)
+
+
+func get_volume(bus: String) -> float:
+	var idx := AudioServer.get_bus_index(bus)
+	if idx == -1 or AudioServer.is_bus_mute(idx):
+		return 0.0
+	return clampf(db_to_linear(AudioServer.get_bus_volume_db(idx)), 0.0, 1.0)
 
 
 func has(group: String) -> bool:
@@ -66,6 +98,7 @@ func start_ambience(group: String, volume_db := -14.0) -> void:
 		return
 	if _ambience == null:
 		_ambience = AudioStreamPlayer.new()
+		_ambience.bus = "Ambience"
 		add_child(_ambience)
 		_ambience.finished.connect(_ambience.play)
 	if _ambience.playing and _ambience.stream == stream:

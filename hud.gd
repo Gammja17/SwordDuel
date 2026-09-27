@@ -1,4 +1,8 @@
 extends CanvasLayer
+
+signal settings_requested            # the gear button on the cards
+signal settings_closed(to_title: bool)
+signal volume_changed(bus: String, value: float)
 ## Everything drawn on screen: the opponent's name and health (top), our health and
 ## guard (bottom), popups for parries/blocks, one-line hints, a hurt vignette, and the
 ## full-screen cards used for the title, duel intros and results.
@@ -33,6 +37,11 @@ var _bind_fill: ColorRect
 var _bind_label: Label
 var _task_panel: PanelContainer
 var _task: Label
+var _settings: CenterContainer
+var _settings_button: Button
+var _resume_button: Button
+var _title_button: Button
+var _sliders := {}
 
 const BAR_W := 420.0
 
@@ -75,6 +84,7 @@ func _ready() -> void:
 	_hint_panel.offset_right = 400
 	_hint_panel.add_theme_stylebox_override("panel", _panel_style(0.55, 10))
 	_hint_panel.modulate.a = 0.0
+	_hint_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hint = Label.new()
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -85,6 +95,7 @@ func _ready() -> void:
 	_build_bind_box()
 	_build_task_panel()
 	_build_card()
+	_build_settings()
 
 	_fade = ColorRect.new()
 	_fade.color = Color(0, 0, 0, 0)
@@ -133,6 +144,30 @@ func task(text: String) -> void:
 
 func clear_task() -> void:
 	_task_panel.visible = false
+
+
+## The small button in the corner that opens the settings from a card screen.
+func show_settings_button(on: bool) -> void:
+	_settings_button.visible = on
+
+
+## in_game: opened from a fight (Resume / back-to-title) rather than from a card.
+func show_settings(volumes: Dictionary, in_game: bool) -> void:
+	for bus in _sliders:
+		(_sliders[bus] as HSlider).set_value_no_signal(float(volumes.get(bus, 1.0)) * 100.0)
+		_update_pct(bus)
+	_resume_button.text = "계속하기" if in_game else "닫기"
+	_title_button.visible = in_game
+	_settings.visible = true
+	_settings_button.visible = false
+
+
+func hide_settings() -> void:
+	_settings.visible = false
+
+
+func is_settings_open() -> bool:
+	return _settings.visible
 
 
 func set_enemy(enemy_name: String) -> void:
@@ -298,6 +333,7 @@ func _build_task_panel() -> void:
 	_task_panel.offset_left = -330
 	_task_panel.offset_right = 330
 	_task_panel.add_theme_stylebox_override("panel", _panel_style(0.6, 12))
+	_task_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_task = Label.new()
 	_task.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_task.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -317,6 +353,7 @@ func _build_card() -> void:
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", _panel_style(0.8, 40))
 	panel.custom_minimum_size = Vector2(700, 0)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE   # a click anywhere advances the card
 	_card.add_child(panel)
 
 	var box := VBoxContainer.new()
@@ -349,6 +386,98 @@ func _build_card() -> void:
 	_card_footer.add_theme_font_size_override("font_size", 18)
 	box.add_child(_card_footer)
 	_card.visible = false
+
+
+func _build_settings() -> void:
+	_settings_button = Button.new()
+	_settings_button.text = "설정"
+	_settings_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_settings_button.offset_left = -110
+	_settings_button.offset_right = -20
+	_settings_button.offset_top = 20
+	_settings_button.offset_bottom = 60
+	_settings_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_settings_button.pressed.connect(func(): settings_requested.emit())
+	_root.add_child(_settings_button)
+	_settings_button.visible = false
+
+	_settings = CenterContainer.new()
+	_settings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_settings.process_mode = Node.PROCESS_MODE_ALWAYS
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.45)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_settings.add_child(dim)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", _panel_style(0.9, 32))
+	panel.custom_minimum_size = Vector2(520, 0)
+	_settings.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 18)
+	panel.add_child(box)
+
+	var title := Label.new()
+	title.text = "설정"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 34)
+	title.add_theme_font_override("font", _title_font())
+	box.add_child(title)
+
+	for row in [["Master", "전체 소리"], ["SFX", "효과음"], ["Ambience", "바람 소리"]]:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 14)
+		var name_label := Label.new()
+		name_label.text = row[1]
+		name_label.custom_minimum_size = Vector2(110, 0)
+		line.add_child(name_label)
+		var slider := HSlider.new()
+		slider.min_value = 0
+		slider.max_value = 100
+		slider.step = 1
+		slider.custom_minimum_size = Vector2(260, 28)
+		slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var bus: String = row[0]
+		slider.value_changed.connect(func(v: float):
+			_update_pct(bus)
+			volume_changed.emit(bus, v / 100.0))
+		line.add_child(slider)
+		var pct := Label.new()
+		pct.name = "Pct"
+		pct.custom_minimum_size = Vector2(56, 0)
+		pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		line.add_child(pct)
+		box.add_child(line)
+		_sliders[bus] = slider
+
+	var hint := Label.new()
+	hint.text = "싸우는 중에는 ESC로 이 창을 엽니다"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.72, 0.72, 0.68))
+	box.add_child(hint)
+
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 16)
+	box.add_child(buttons)
+	_resume_button = Button.new()
+	_resume_button.text = "계속하기"
+	_resume_button.custom_minimum_size = Vector2(150, 44)
+	_resume_button.pressed.connect(func(): settings_closed.emit(false))
+	buttons.add_child(_resume_button)
+	_title_button = Button.new()
+	_title_button.text = "처음 화면으로"
+	_title_button.custom_minimum_size = Vector2(150, 44)
+	_title_button.pressed.connect(func(): settings_closed.emit(true))
+	buttons.add_child(_title_button)
+
+	_root.add_child(_settings)
+	_settings.visible = false
+
+
+func _update_pct(bus: String) -> void:
+	var slider: HSlider = _sliders[bus]
+	(slider.get_parent().get_node("Pct") as Label).text = "%d%%" % int(slider.value)
 
 
 func _bar(parent: Control, pos: Vector2, size: Vector2, color: Color) -> ColorRect:

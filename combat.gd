@@ -88,12 +88,16 @@ func _physics_process(delta: float) -> void:
 		if hit.found:
 			ps.try_cut(opponent, hit.point)
 
-	# Its cut.
-	if opponent.can_cut():
+	# Its cut (a well-timed dodge makes it pass through). Holding guard (right mouse)
+	# turns a cut that reaches us into a parry if it was just pressed, else a block.
+	if opponent.can_cut() and not player.is_invulnerable():
 		var hit2 := _swept_body(opponent.blade_prev_base, opponent.blade_prev_tip,
 			opponent.blade_base, opponent.blade_tip, player.global_position, 0.30)
 		if hit2.found:
-			opponent.land_cut(player, hit2.point)
+			if player.is_guarding():
+				ps.clash(hit2.point, opponent, opponent.blade_tip_vel)
+			else:
+				opponent.land_cut(player, hit2.point)
 
 
 # --- bind --------------------------------------------------------------------------

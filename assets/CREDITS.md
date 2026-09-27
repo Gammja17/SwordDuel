@@ -103,3 +103,14 @@ Sizes are Poly Haven's listed real-world dimensions (width x depth x height; the
 | `NanumMyeongjo-Regular.ttf` | Nanum Myeongjo Regular (weight 400), full font, not subset | NHN Corporation (Naver); designed by Sandoll Communication / FONTRIX | https://github.com/google/fonts/tree/main/ofl/nanummyeongjo | SIL OFL 1.1 |
 | `NanumMyeongjo-ExtraBold.ttf` | Nanum Myeongjo ExtraBold (weight 800), full font, not subset | same as above | same as above | SIL OFL 1.1 |
 | `OFL.txt` | The license text that ships with the font (Copyright (c) 2010 NHN Corporation; its Reserved Font Names include "Nanum" and "NanumMyeongjo") | — | same as above | — |
+
+## Characters (`characters/`)
+
+Files are unmodified and keep the pack's own names. `Knight.glb` already embeds `knight_texture.png`; the
+loose copy in `weapons/` is there because the weapon `.gltf` files load it from their own folder.
+See `characters/knight/INSPECT.md` for the rig, animations and sizes.
+
+| Files | Original asset | Author | Source | License |
+|---|---|---|---|---|
+| `knight/Knight.glb`, `knight/knight_texture.png`, `knight/LICENSE.txt` | KayKit Character Pack: Adventurers 1.0, Knight (`Characters/gltf/Knight.glb`: rigged low-poly knight with 76 animations, swords, shields, helmet and cape as bone-attached nodes) | Kay Lousberg (KayKit) | https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 (also https://kaylousberg.itch.io/kaykit-adventurers) | CC0 |
+| `knight/weapons/sword_1handed.gltf` + `.bin`, `sword_2handed.gltf` + `.bin`, `sword_2handed_color.gltf` + `.bin`, `knight/weapons/knight_texture.png` | Same pack (`Assets/gltf/`: one-handed sword, two-handed sword, coloured two-handed sword) | Kay Lousberg (KayKit) | same as above | CC0 |

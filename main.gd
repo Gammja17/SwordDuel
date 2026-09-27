@@ -73,13 +73,15 @@ const PRACTICE_TIER := {
 	"tabard": Color(0.20, 0.30, 0.55), "crest": false,
 }
 const PRACTICE_STEPS := [
-	{"drill": "idle", "task": "마우스를 크게 휘둘러 보세요"},
-	{"drill": "open", "task": "W로 다가가서 베어 보세요"},
-	{"drill": "attack", "task": "내려오는 칼을 향해 휘둘러 쳐내세요"},
-	{"drill": "bind", "task": "칼이 맞물리면 화살표 쪽으로 마우스를 미세요"},
+	{"id": "swing", "drill": "idle", "task": "마우스를 크게 휘둘러 보세요"},
+	{"id": "cut", "drill": "open", "task": "W로 다가가서 베어 보세요"},
+	{"id": "parry", "drill": "attack", "task": "내려오는 칼을 향해 휘두르거나\n닿기 직전에 우클릭해서 쳐내세요"},
+	{"id": "dodge", "drill": "attack", "task": "칼이 내려오면 스페이스로 피하세요"},
+	{"id": "bind", "drill": "bind", "task": "칼이 맞물리면 화살표 쪽으로 마우스를 미세요"},
 ]
 
 var hitstop_enabled := true   # the headless probe turns this off
+var auto_pause := true        # losing the mouse mid-fight opens the settings (off in headless tests)
 
 var _phase: int = Phase.TITLE
 var _tier := 0
@@ -100,6 +102,9 @@ var _practice_step := -1
 var _step_done_at := 0
 var _rebind_at := 0
 var _visibility_cb: JavaScriptObject
+var _menu_open := false
+var _captured_at := 0
+var _volumes := {"Master": 0.5, "SFX": 0.8, "Ambience": 0.5}
 
 
 func _ready() -> void:
@@ -108,6 +113,11 @@ func _ready() -> void:
 	_build_world()
 	_hud = HudScript.new()
 	add_child(_hud)
+	_hud.settings_requested.connect(func(): _open_menu(false))
+	_hud.settings_closed.connect(_close_menu)
+	_hud.volume_changed.connect(_on_volume_changed)
+	for bus in _volumes:
+		Sfx.set_volume(bus, _volumes[bus])
 	_title_cam = Camera3D.new()
 	_title_cam.fov = 55.0
 	add_child(_title_cam)
@@ -140,9 +150,15 @@ func _process(delta: float) -> void:
 					_hud.hide_bind()
 				if _phase == Phase.PRACTICE:
 					_run_practice()
+				# ESC (or the browser dropping the mouse lock) mid-fight opens the settings.
+				if auto_pause and _player.active and not _menu_open and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED \
+						and Time.get_ticks_msec() - _captured_at > 400:
+					_open_menu(true)
 
 
-func _input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
+	if _menu_open:
+		return
 	var click: bool = event is InputEventMouseButton and event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT
 	var key: bool = event is InputEventKey and event.pressed and not event.is_echo() \
 		and (event as InputEventKey).physical_keycode in [KEY_SPACE, KEY_ENTER]
@@ -197,7 +213,7 @@ func _to_title() -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	_hud.show_card("1대1 검술 결투", "진검승부",
-		"마우스로 칼을 휘둘러 싸웁니다.\nW 다가서기, S 물러나기, A와 D 옆걸음\n세 사람을 차례로 이기면 끝납니다.",
+		"마우스로 칼을 휘둘러 싸웁니다.\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 회피, 우클릭 막기와 쳐내기\n세 사람을 차례로 이기면 끝납니다.",
 		"클릭하면 시작합니다\nP를 누르면 연습을 다시 합니다" if _practice_done else "클릭하면 연습부터 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
@@ -222,7 +238,7 @@ func _start_fight() -> void:
 	_hud.hide_card()
 	_hud.show_fight_ui(true)
 	_hud.set_enemy(_opponent.display_name)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_capture_mouse()
 	_player.active = true
 	_opponent.begin()
 	Sfx.play_flat("draw", -2.0)
@@ -315,6 +331,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.hurt.connect(_on_player_hurt)
 	_player.died.connect(_on_player_died)
 	_opponent.died.connect(_on_opponent_died)
+	_opponent.attack_whiffed.connect(_on_attack_whiffed)
 
 
 func _clear_duel() -> void:
@@ -342,7 +359,7 @@ func _start_practice() -> void:
 	_player.active = true
 	_hud.hide_card()
 	_hud.show_fight_ui(true, false)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_capture_mouse()
 	Sfx.play_flat("draw", -2.0)
 	_set_practice_step(0)
 	_set_fps()
@@ -356,6 +373,12 @@ func _set_practice_step(i: int) -> void:
 	_opponent.set_drill(st["drill"])
 	_combat.set("allow_binds", st["drill"] == "bind")
 	_hud.task("연습 %d/%d\n%s" % [i + 1, PRACTICE_STEPS.size(), st["task"]])
+
+
+func _step_id() -> String:
+	if _phase != Phase.PRACTICE or _practice_step < 0:
+		return ""
+	return PRACTICE_STEPS[_practice_step]["id"]
 
 
 func _practice_success() -> void:
@@ -374,13 +397,13 @@ func _run_practice() -> void:
 			_finish_practice()
 		return
 	var sword = _player.sword
-	match _practice_step:
-		0:
+	match _step_id():
+		"swing":
 			if sword.can_cut():
 				_practice_success()
 			elif sword.swing_speed >= 3.0:
 				_hint_once("p_bigger", "더 크게 휘둘러 보세요")
-		3:
+		"bind":
 			var dist: float = _opponent.call("_horizontal_dist", _player.global_position)
 			if not _combat.is_bound() and now >= _rebind_at and dist < 2.4 and _step_done_at == 0:
 				_combat.begin_bind((sword.base + sword.tip + _opponent.blade_base + _opponent.blade_tip) * 0.25)
@@ -411,7 +434,7 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 			_stats["parries"] += 1
 			_hud.popup("쳐내기!", GOLD)
 			_hitstop(0.09)
-			if _phase == Phase.PRACTICE and _practice_step == 2:
+			if _step_id() == "parry":
 				_practice_success()
 		"PARRIED":
 			_stats["parried_me"] += 1
@@ -421,8 +444,8 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 			_stats["blocks"] += 1
 			_hud.popup("막음", Color(0.8, 0.8, 0.78))
 			_hitstop(0.05)
-			if _phase == Phase.PRACTICE and _practice_step == 2:
-				_hud.hint("막기만 했어요. 칼을 향해 휘둘러야 쳐냅니다", 3.0)
+			if _step_id() == "parry":
+				_hud.hint("막기만 했어요. 칼을 향해 휘두르거나 더 늦게 우클릭하세요", 3.0)
 		"GUARD BROKEN":
 			_stats["blocks"] += 1
 			_hud.popup("자세 무너짐!", RED)
@@ -444,15 +467,22 @@ func _on_cut(strength: float, _pos: Vector3) -> void:
 		_hitstop(0.09)
 	else:
 		_hitstop(0.07)
-	if _phase == Phase.PRACTICE and _practice_step == 1:
+	if _step_id() == "cut":
 		_practice_success()
 
 
 func _on_player_hurt(_amount: float) -> void:
 	_stats["hits"] += 1
 	_hitstop(0.08)
-	if _phase == Phase.PRACTICE and _practice_step == 2:
+	if _step_id() == "parry":
 		_hud.hint("맞았어요. 칼을 치켜든 쪽을 보세요", 3.0)
+	elif _step_id() == "dodge":
+		_hud.hint("맞았어요. 칼이 내려오기 직전에 스페이스를 누르세요", 3.0)
+
+
+func _on_attack_whiffed() -> void:
+	if _step_id() == "dodge" and _player.dodged_within(900):
+		_practice_success()
 
 
 func _on_bind_ended(result: String) -> void:
@@ -461,7 +491,7 @@ func _on_bind_ended(result: String) -> void:
 			_stats["binds_won"] += 1
 			_hud.popup("걷어냈다!", GOLD)
 			_hitstop(0.08)
-			if _phase == Phase.PRACTICE and _practice_step == 3:
+			if _step_id() == "bind":
 				_practice_success()
 		"lost":
 			_stats["binds_lost"] += 1
@@ -515,17 +545,58 @@ func _load_progress() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
 		_practice_done = bool(cfg.get_value("progress", "practice_done", false))
+		for bus in _volumes:
+			_volumes[bus] = float(cfg.get_value("volume", bus, _volumes[bus]))
 
 
 func _save_progress() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("progress", "practice_done", _practice_done)
+	for bus in _volumes:
+		cfg.set_value("volume", bus, _volumes[bus])
 	cfg.save(SAVE_PATH)
 
 
-## 60 fps while fighting, 30 on the cards between fights.
+## 60 fps while fighting, 30 on the cards between fights. (Called on every phase
+## change, so it also shows the settings button on card screens.)
 func _set_fps() -> void:
-	Engine.max_fps = 60 if (_phase == Phase.FIGHT or _phase == Phase.PRACTICE) else 30
+	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE
+	Engine.max_fps = 60 if fighting else 30
+	_hud.show_settings_button(not fighting and not _menu_open)
+
+
+func _capture_mouse() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_captured_at = Time.get_ticks_msec()
+
+
+# --- settings ---------------------------------------------------------------------
+
+## in_game: opened mid-fight, which pauses it.
+func _open_menu(in_game: bool) -> void:
+	_menu_open = true
+	if in_game:
+		get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_hud.show_settings(_volumes, in_game)
+
+
+func _close_menu(to_title: bool) -> void:
+	_menu_open = false
+	_hud.hide_settings()
+	_save_progress()
+	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE
+	get_tree().paused = false
+	if to_title:
+		_to_title()
+	elif fighting:
+		_capture_mouse()   # the button click is the user gesture browsers require
+	_set_fps()
+
+
+func _on_volume_changed(bus: String, value: float) -> void:
+	_volumes[bus] = value
+	Sfx.set_volume(bus, value)
 
 
 ## In the browser: stop everything while the tab is hidden, and keep the 3D resolution
@@ -543,11 +614,15 @@ func _setup_web() -> void:
 
 func _on_visibility_change(_args: Array) -> void:
 	var hidden := bool(JavaScriptBridge.eval("document.hidden", true))
-	get_tree().paused = hidden
-	AudioServer.set_bus_mute(0, hidden)
 	if hidden:
+		get_tree().paused = true
+		AudioServer.set_bus_mute(0, true)
 		Engine.max_fps = 5
+		if (_phase == Phase.FIGHT or _phase == Phase.PRACTICE) and not _menu_open:
+			_open_menu(true)   # come back to a paused game, not a fight already under way
 	else:
+		Sfx.set_volume("Master", _volumes["Master"])
+		get_tree().paused = _menu_open and (_phase == Phase.FIGHT or _phase == Phase.PRACTICE)
 		_set_fps()
 
 
