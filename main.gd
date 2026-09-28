@@ -722,15 +722,17 @@ func _build_world() -> void:
 	if ResourceLoader.exists(SKY_HDRI):
 		var pano := PanoramaSkyMaterial.new()
 		pano.panorama = load(SKY_HDRI)
+		pano.energy_multiplier = 0.6   # the sun in the photo otherwise washes the sky out white
 		sky.sky_material = pano
 	else:
 		sky.sky_material = ProceduralSkyMaterial.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.75
+	env.ambient_light_energy = 1.1
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 0.9
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.62, 0.55, 0.50)
 	env.fog_density = 0.008
@@ -739,7 +741,7 @@ func _build_world() -> void:
 	env.adjustment_contrast = 1.08
 	env.adjustment_saturation = 1.12
 	env.glow_enabled = true
-	env.glow_intensity = 0.6
+	env.glow_intensity = 0.45
 	env.glow_bloom = 0.05
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
