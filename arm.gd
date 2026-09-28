@@ -27,6 +27,11 @@ func _init(parent: Node3D, upper: float, fore: float, sleeve: Material, plate: M
 			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
+func set_visible(on: bool) -> void:
+	for mi in [_upper, _fore, _elbow, _hand]:
+		(mi as MeshInstance3D).visible = on
+
+
 ## Poses the arm and returns where the hand actually is (the target, unless it was out
 ## of reach, in which case the arm is fully extended toward it).
 func pose(shoulder: Vector3, target: Vector3, pole: Vector3, hand_basis: Basis) -> Vector3:

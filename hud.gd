@@ -46,6 +46,7 @@ var _sliders := {}
 const BAR_W := 420.0
 
 var _prompt: Label
+var _bars: Array[ColorRect] = []   # letterbox, for the execution shot
 
 
 func _ready() -> void:
@@ -77,6 +78,18 @@ func _ready() -> void:
 	_prompt.add_theme_color_override("font_color", GOLD)
 	_prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_prompt)
+
+	for top in [true, false]:
+		var bar := ColorRect.new()
+		bar.color = Color(0, 0, 0, 1)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.set_anchors_preset(Control.PRESET_TOP_WIDE if top else Control.PRESET_BOTTOM_WIDE)
+		bar.anchor_top = 0.0 if top else 1.0
+		bar.anchor_bottom = 0.0 if top else 1.0
+		bar.offset_top = 0.0
+		bar.offset_bottom = 0.0
+		_root.add_child(bar)
+		_bars.append(bar)
 
 	_popup = Label.new()
 	_popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -200,6 +213,17 @@ func set_player(hp_frac: float, guard_frac: float, hurt: float, breath_frac := 1
 	_guard_fill.size.x = 300.0 * clampf(guard_frac, 0.0, 1.0)
 	_guard_fill.color = Color(0.95, 0.35, 0.2) if guard_frac > 0.66 else GOLD
 	_hurt.modulate.a = clampf(hurt, 0.0, 1.0) * 0.8
+
+
+## Black bars slide in top and bottom (a film shot) or back out.
+func set_letterbox(on: bool) -> void:
+	var h := get_viewport().get_visible_rect().size.y * 0.12
+	var tw := create_tween().set_ignore_time_scale(true).set_parallel(true)
+	tw.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_bars[0], "offset_bottom", h if on else 0.0, 0.18)
+	tw.tween_property(_bars[1], "offset_top", -h if on else 0.0, 0.18)
+	_enemy_box.visible = not on
+	_player_box.visible = not on
 
 
 ## The key prompt for a special move ("" hides it); it pulses while shown.

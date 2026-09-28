@@ -46,6 +46,20 @@ const UPPER_BONES := ["Spine", "Chest", "UpperChest", "Neck", "Head",
 	"LeftShoulder", "LeftUpperArm", "LeftLowerArm", "LeftHand",
 	"RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand"]
 const FINGERS := ["Thumb", "Index", "Middle", "Ring", "Little"]
+
+# Modelled clothes (Quaternius, CC0), skinned to the same rig as the animations: the
+# outfit, the hair pieces, a tint for the cloth and leather, and the hair colour (the
+# hair texture is grey, made to be tinted). The face and neck come from the base
+# character; the rest of its body stays hidden under the clothes.
+const OUTFIT_DIR := "res://assets/characters/outfits/"
+const OUTFITS := {
+	"squire": ["Male_Peasant", ["Hair_SimpleParted"], Color(1.0, 1.0, 1.0), Color(0.36, 0.22, 0.12)],
+	"knight": ["Male_Ranger", ["Hair_Beard"], Color(0.95, 0.66, 0.5), Color(0.22, 0.14, 0.09)],
+	"master": ["Male_Ranger", ["Hair_Beard"], Color(0.42, 0.40, 0.40), Color(0.55, 0.53, 0.50)],
+	# The player, seen only in an execution: the outfit's own green.
+	"player": ["Male_Ranger", ["Hair_Beard"], Color(1.0, 1.0, 1.0), Color(0.18, 0.12, 0.08)],
+}
+const HEAD_BONES := ["Head", "Neck"]
 const SEGMENTS := ["Metacarpal", "Proximal", "Intermediate", "Distal"]
 
 # The longsword in the right fist, in the hand bone's frame: the blade runs along the
@@ -86,6 +100,7 @@ var skeleton: Skeleton3D
 var sword: Node3D
 var _model: Node3D
 var _steel: StandardMaterial3D
+var _flash_mats: Array[BaseMaterial3D] = []   # lit up red when a blow lands
 var _flash := 0.0
 var _action_weight := 0.0
 var _action_target := 0.0
@@ -101,10 +116,11 @@ var _gait := "idle"
 var _left_ik: SkeletonModifier3D
 var _right_ik: SkeletonModifier3D
 var _left_on_sword: Node3D
+var _grab_node: Node3D     # where the left hand grips someone, when it lets go of the sword
 var _two_hands := 1.0
 
 
-func build(tabard_color: Color, crest: bool) -> void:
+func build(tabard_color: Color, crest: bool, outfit := "") -> void:
 	_model = (load(BODY) as PackedScene).instantiate() as Node3D
 	_model.rotation.y = PI   # the model faces +Z; we face -Z
 	add_child(_model)
@@ -125,7 +141,10 @@ func build(tabard_color: Color, crest: bool) -> void:
 	_torso = TorsoTurn.new()
 	skeleton.add_child(_torso)
 	_build_tree()
-	_dress(tabard_color, crest)
+	if OUTFITS.has(outfit):
+		_dress_outfit(outfit)
+	else:
+		_dress(tabard_color, crest)
 	_build_grip()
 
 
@@ -138,6 +157,7 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 		body_mesh.material_override = Armor.mail()
 
 	_steel = Armor.two_sided(Armor.steel())
+	_flash_mats.append(_steel)
 	var dark := Armor.dark_steel()
 	var cloth := Armor.two_sided(Armor.cloth(tabard_color))
 	var leather := Armor.leather()
@@ -179,10 +199,103 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 		Armor.part(_attach(side + "LowerLeg"), Armor.sphere(0.072), _steel, Vector3(0, 0.0, 0.04))
 		Armor.part(_attach(side + "Foot"), Armor.box(Vector3(0.11, 0.25, 0.08)), dark, Vector3(0, 0.07, 0.0))
 
-	sword = SwordMesh.build(Armor.blade(), dark, leather)
+	_hold_sword(dark, leather)
+
+
+func _hold_sword(fittings: Material, grip_mat: Material) -> void:
+	sword = SwordMesh.build(Armor.blade(), fittings, grip_mat)
 	var grip := _attach("RightHand")
 	grip.add_child(sword)
 	sword.transform = SWORD_IN_HAND
+
+
+## Dressed in modelled clothes instead of the built-up plate.
+func _dress_outfit(kind: String) -> void:
+	var body_mesh := skeleton.find_child("Mannequin", true, false) as MeshInstance3D
+	if body_mesh:
+		body_mesh.visible = false
+	var o: Array = OUTFITS[kind]
+	_wear("Superhero_Male_FullBody", HEAD_BONES, Color.WHITE, false, o[3])   # the face, eyes and brows
+	_wear(o[0], [], o[2], true)
+	for piece in o[1]:
+		_wear(piece, [], Color.WHITE, false, o[3])
+	_hold_sword(Armor.dark_steel(), Armor.leather())
+
+
+## Put a modelled piece on: each of its meshes is moved onto our skeleton (its skin binds
+## by bone name, and the import gave it the same bone names and rest). keep_bones: keep
+## only the triangles that hang on those bones. flash: this is what lights up when hit.
+## hair: the colour for hair materials.
+func _wear(file: String, keep_bones: Array, tint: Color, flash := false, hair := Color.WHITE) -> void:
+	var path := OUTFIT_DIR + file + ".gltf"
+	if not ResourceLoader.exists(path):
+		return
+	var scene := (load(path) as PackedScene).instantiate() as Node3D
+	add_child(scene)   # in the tree for a moment, to read where each mesh sits
+	var src_skel := scene.find_child("GeneralSkeleton", true, false) as Skeleton3D
+	for n in scene.find_children("*", "MeshInstance3D", true, false):
+		var src := n as MeshInstance3D
+		var mesh := src.mesh
+		if not keep_bones.is_empty() and src.skin != null and mesh.get_surface_count() > 0 \
+				and not src.name.begins_with("Eye"):
+			mesh = _only_on_bones(mesh, src.skin, keep_bones)
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.skin = src.skin
+		skeleton.add_child(mi)
+		mi.transform = src_skel.global_transform.affine_inverse() * src.global_transform
+		mi.skeleton = mi.get_path_to(skeleton)
+		for s in mesh.get_surface_count():
+			var m := mesh.surface_get_material(s) as BaseMaterial3D
+			if m == null:
+				continue
+			var c := hair if m.resource_name.contains("Hair") else tint
+			if c != Color.WHITE or flash:
+				m = m.duplicate() as BaseMaterial3D
+				m.albedo_color = m.albedo_color * c
+				mi.set_surface_override_material(s, m)
+			if flash:
+				_flash_mats.append(m)
+	remove_child(scene)
+	scene.free()
+
+
+## The part of a skinned mesh whose triangles hang (by their strongest weight) on the
+## given bones.
+static func _only_on_bones(mesh: Mesh, skin: Skin, bones: Array) -> ArrayMesh:
+	var keep := {}
+	for i in skin.get_bind_count():
+		if String(skin.get_bind_name(i)) in bones:
+			keep[i] = true
+	var out := ArrayMesh.new()
+	for s in mesh.get_surface_count():
+		var arr := mesh.surface_get_arrays(s)
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		var bone_ids: PackedInt32Array = arr[Mesh.ARRAY_BONES]
+		var weights: PackedFloat32Array = arr[Mesh.ARRAY_WEIGHTS]
+		var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		if idx.is_empty() or bone_ids.is_empty():
+			continue
+		var per := bone_ids.size() / verts.size()
+		var on := PackedByteArray()
+		on.resize(verts.size())
+		for v in verts.size():
+			var best := 0
+			for k in range(1, per):
+				if weights[v * per + k] > weights[v * per + best]:
+					best = k
+			on[v] = 1 if keep.has(bone_ids[v * per + best]) else 0
+		var kept := PackedInt32Array()
+		for t in range(0, idx.size(), 3):
+			if on[idx[t]] == 1 and on[idx[t + 1]] == 1 and on[idx[t + 2]] == 1:
+				kept.append_array([idx[t], idx[t + 1], idx[t + 2]])
+		if kept.is_empty():
+			continue
+		arr[Mesh.ARRAY_INDEX] = kept
+		var flags: int = mesh.surface_get_format(s) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
+		out.surface_set_material(out.get_surface_count() - 1, mesh.surface_get_material(s))
+	return out
 
 
 ## A BoneAttachment3D following the named bone (one per bone, reused).
@@ -389,6 +502,32 @@ func sword_transform() -> Transform3D:
 	return sword.global_transform
 
 
+## Hold the sword exactly here (world space), for a body mirroring someone else's blade.
+func hold_at(world: Transform3D, yaw: float, lean: float) -> void:
+	_torso.yaw = yaw
+	_torso.lean = lean
+	sword.global_transform = world
+
+
+## Take the left hand off the sword to grip something at `point` (world), or put it
+## back on the sword (null).
+func grab(point: Variant) -> void:
+	if point == null:
+		if _grab_node != null:
+			_left_ik.set_target_node(0, _left_ik.get_path_to(_left_on_sword))
+			_grip_hands.left_target = _left_on_sword
+			_grab_node.queue_free()
+			_grab_node = null
+		return
+	if _grab_node == null:
+		_grab_node = Node3D.new()
+		_grab_node.top_level = true
+		add_child(_grab_node)
+		_left_ik.set_target_node(0, _left_ik.get_path_to(_grab_node))
+		_grip_hands.left_target = null
+	_grab_node.global_position = point
+
+
 ## Where sword poses are measured from (the top of the chest), in body space.
 func chest_anchor() -> Vector3:
 	return to_local(skeleton.global_transform * skeleton.get_bone_global_pose(_hips).origin) + HIPS_TO_CHEST
@@ -415,9 +554,10 @@ func update_body(delta: float) -> void:
 	tree.set("parameters/guard_seek/seek_request", GUARD_TIME)
 	if _flash > 0.0:
 		_flash = maxf(_flash - delta * 4.0, 0.0)
-		_steel.emission_enabled = _flash > 0.0
-		_steel.emission = Color(0.9, 0.12, 0.05)
-		_steel.emission_energy_multiplier = _flash * 1.6
+		for m in _flash_mats:
+			m.emission_enabled = _flash > 0.0
+			m.emission = Color(0.9, 0.12, 0.05)
+			m.emission_energy_multiplier = _flash * 1.6
 
 
 func flash() -> void:

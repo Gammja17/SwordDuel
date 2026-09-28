@@ -120,7 +120,7 @@ func setup(player: Node3D, tier: Dictionary) -> void:
 	max_hp = float(tier.get("hp", 100.0))
 	hp = max_hp
 	display_name = String(tier.get("name", ""))
-	_body.build(tier.get("tabard", Color(0.3, 0.3, 0.45)), bool(tier.get("crest", false)))
+	_body.build(tier.get("tabard", Color(0.3, 0.3, 0.45)), bool(tier.get("crest", false)), String(tier.get("outfit", "")))
 	_pose = SwordPoses.make("guard")
 	_sword_to(_pose, 0.01)
 	_update_sword(0.0)
@@ -687,6 +687,11 @@ func stabbed(damage: float, pos: Vector3, dir: Vector3) -> void:
 	Sfx.play("armor", pos, -2.0)
 	if hp <= 0.0:
 		_die(true)
+
+
+## The middle of its chest right now (world), following the animation.
+func chest_point() -> Vector3:
+	return _body.to_global(_body.chest_anchor() + Vector3(0.0, -0.1, -0.08))
 
 
 ## Let go of it: shoved away, reeling.

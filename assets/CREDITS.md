@@ -116,3 +116,16 @@ See `characters/knight/INSPECT.md` and `characters/body/INSPECT.md` for the rigs
 | `knight/weapons/sword_1handed.gltf` + `.bin`, `sword_2handed.gltf` + `.bin`, `sword_2handed_color.gltf` + `.bin`, `knight/weapons/knight_texture.png` | Same pack (`Assets/gltf/`: one-handed sword, two-handed sword, coloured two-handed sword) | Kay Lousberg (KayKit) | same as above | CC0 |
 | `body/UAL1_Standard.glb`, `body/LICENSE.txt` | Universal Animation Library, free Standard version v3.0 (`Unreal-Godot/UAL1_Standard.glb`, no root motion build: realistic-proportion 1.83 m mannequin on a 65-joint humanoid rig with 43 animations; `License.txt` renamed) | Quaternius | https://quaternius.itch.io/universal-animation-library (also https://quaternius.com) | CC0 |
 | `body/UAL2_Standard.glb` | Universal Animation Library 2, free Standard version v2.1 (`Unreal-Godot/UAL2_Standard.glb`, no root motion build: same mannequin and rig with 43 more animations, including sword combos and block) | Quaternius | https://quaternius.itch.io/universal-animation-library-2 (also https://quaternius.com) | CC0 |
+
+## Modelled characters (`characters/outfits/`)
+
+The opponents (and the player, in an execution) wear modelled clothes skinned to the same humanoid rig as the
+Universal Animation Library, retargeted at import with the same bone map. Textures were scaled down to
+1024×1024 (colour and ORM maps as JPG, normal maps as PNG) and the glTF files re-pointed at them; the meshes are
+unchanged. Only the face and neck of the base character are used (the rest of its body is cut away at load time,
+by bone weight, so it can't show through the clothes). Hair is tinted in the game.
+
+| Files | Original asset | Author | Source | License |
+|---|---|---|---|---|
+| `Male_Ranger.*`, `Male_Peasant.*`, `T_Ranger_*`, `T_Peasant_*`, `T_Regular_Male_*`, `LICENSE.txt` | Modular Character Outfits - Fantasy, free Standard version (`Exports/glTF (Godot-Unreal)/Outfits/`: the ranger and peasant outfits) | Quaternius | https://quaternius.com/packs/modularcharacteroutfitsfantasy.html (also https://quaternius.itch.io/modular-character-outfits-fantasy) | CC0 |
+| `Superhero_Male_FullBody.*`, `Hair_*`, `Eyebrows_Regular.*`, `T_Superhero_Male_*`, `T_Hair_1_*`, `T_Eye_*`, `LICENSE_UBC.txt` | Universal Base Characters, free Standard version (the male base character and hairstyles rigged to the head bone) | Quaternius | https://quaternius.com/packs/universalbasecharacters.html | CC0 |

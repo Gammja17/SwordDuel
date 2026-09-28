@@ -10,6 +10,7 @@ const PlayerScript := preload("res://player.gd")
 const OpponentScript := preload("res://opponent.gd")
 const HudScript := preload("res://hud.gd")
 const CombatScript := preload("res://combat.gd")
+const Cinematic := preload("res://cinematic.gd")
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 
@@ -34,7 +35,7 @@ const TIERS := [
 		"armor": 0.5, "flinch_speed": 6.0,
 		"parry": 0.1, "bind_press": 0.25, "bind_strength": 0.5, "bind_switch": Vector2(2.2, 3.2), "exit_cut": 0.2,
 		"guard_track": 4.0, "speed": 2.2,
-		"tabard": Color(0.20, 0.30, 0.55), "crest": false,
+		"tabard": Color(0.20, 0.30, 0.55), "crest": false, "outfit": "squire",
 	},
 	{
 		"kicker": "두 번째 상대",
@@ -46,7 +47,7 @@ const TIERS := [
 		"armor": 2.0, "flinch_speed": 9.0,
 		"parry": 0.3, "bind_press": 0.35, "bind_strength": 0.6, "bind_switch": Vector2(1.7, 2.7), "exit_cut": 0.45,
 		"guard_track": 7.0, "speed": 2.5,
-		"tabard": Color(0.55, 0.12, 0.10), "crest": false,
+		"tabard": Color(0.55, 0.12, 0.10), "crest": false, "outfit": "knight",
 	},
 	{
 		"kicker": "마지막 상대",
@@ -58,7 +59,7 @@ const TIERS := [
 		"armor": 3.0, "flinch_speed": 11.0,
 		"parry": 0.45, "bind_press": 0.5, "bind_strength": 0.8, "bind_switch": Vector2(1.3, 2.2), "exit_cut": 0.7,
 		"guard_track": 12.0, "speed": 2.8,
-		"tabard": Color(0.10, 0.10, 0.12), "crest": true,
+		"tabard": Color(0.10, 0.10, 0.12), "crest": true, "outfit": "master",
 	},
 ]
 
@@ -70,7 +71,7 @@ const PRACTICE_TIER := {
 	"armor": 0.0, "flinch_speed": 3.0,
 	"parry": 0.0, "bind_press": 0.0, "bind_strength": 0.4, "bind_switch": Vector2(1.8, 2.6), "exit_cut": 0.0,
 	"guard_track": 3.0, "speed": 2.0,
-	"tabard": Color(0.20, 0.30, 0.55), "crest": false,
+	"tabard": Color(0.20, 0.30, 0.55), "crest": false, "outfit": "squire",
 }
 const PRACTICE_STEPS := [
 	{"id": "swing", "drill": "idle", "task": "마우스를 세게 휘두르거나 좌클릭해 보세요"},
@@ -345,6 +346,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.sword.clash_registered.connect(_on_clash)
 	_player.sword.weak_touch.connect(_on_weak_touch)
 	_player.special_struck.connect(_on_special_struck)
+	_player.execution_started.connect(_on_execution_started)
 	_player.hurt.connect(_on_player_hurt)
 	_player.lock_changed.connect(_on_lock_changed)
 	_player.died.connect(_on_player_died)
@@ -498,6 +500,15 @@ func _on_cut(strength: float, _pos: Vector3) -> void:
 		_player.add_trauma(0.3)
 	if _step_id() == "cut":
 		_practice_success()
+
+
+## An execution is shown from outside, letterboxed.
+func _on_execution_started() -> void:
+	var cine := Cinematic.new()
+	add_child(cine)
+	cine.start(_player, _opponent)
+	_hud.set_letterbox(true)
+	cine.finished.connect(func(): _hud.set_letterbox(false))
 
 
 func _on_special_struck(kind: String) -> void:

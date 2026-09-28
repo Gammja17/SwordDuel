@@ -12,6 +12,7 @@ signal hurt(amount: float)
 signal died
 signal lock_changed(locked: bool)
 signal special_struck(kind: String)   # a critical thrust or an execution went in
+signal execution_started
 
 const SwordScript := preload("res://sword.gd")
 const ArmScript := preload("res://arm.gd")
@@ -785,10 +786,33 @@ func try_special() -> void:
 	_parry_t = -1.0
 	target.seize()
 	Sfx.play_flat("armor", -2.0)
+	if kind == "execute":
+		execution_started.emit()
 
 
 func in_special() -> bool:
 	return _special != ""
+
+
+## (seconds into the special move, when its blade goes in)
+func special_clock() -> Vector2:
+	return Vector2(_sp_t, _sp_end(1)) if _special != "" else Vector2.ZERO
+
+
+## An execution's left hand still has hold of them.
+func grab_active() -> bool:
+	return _special == "execute" and _sp_t < _sp_end(3) and target != null
+
+
+func grab_point() -> Vector3:
+	return _grab_point()
+
+
+## Our own arms and sword, hidden while an execution is shown from outside.
+func set_first_person_visible(on: bool) -> void:
+	sword.visible = on
+	_arm_r.set_visible(on)
+	_arm_l.set_visible(on)
 
 
 ## When phase i of the current special move ends (seconds into it).
@@ -823,7 +847,10 @@ func _grab_point() -> Vector3:
 ## The sword through the special move: [grip, dir] in body space.
 func _special_pose(delta: float, held: Array) -> Array:
 	_sp_t += delta
-	var chest := to_local(target.global_position + Vector3(0.0, 1.2, 0.0)) if target != null else Vector3(0, 1.2, -1.0)
+	# Their chest where it is now (it sinks as they go down on their knees).
+	var chest := Vector3(0, 1.2, -1.0)
+	if target != null:
+		chest = to_local(target.chest_point() if target.has_method("chest_point") else target.global_position + Vector3(0.0, 1.2, 0.0))
 	var execute := _special == "execute"
 	# Drawn back: for a thrust the hilt at the right hip, point on them; for an
 	# execution high by the right shoulder (one hand; the other has hold of them).
@@ -848,7 +875,12 @@ func _special_pose(delta: float, held: Array) -> Array:
 		# Held in, leaning on it (an execution follows them down a little).
 		var p := (_sp_t - _sp_end(1)) / (_sp_end(2) - _sp_end(1))
 		var push := Vector3(0.0, -0.12 * p if execute else 0.0, -0.04 * sin(PI * minf(p * 2.0, 1.0)))
-		out = [stab[0] + push, ((stab[1] as Vector3) + Vector3(0.0, -0.2 * p if execute else 0.0, 0.0)).normalized()]
+		if execute:
+			# Following them down: the hilt drops and the point stays in their chest.
+			var grip: Vector3 = stab[0] + Vector3(0.0, minf(chest.y - 1.2, 0.0) * 0.8, 0.0)
+			out = [grip, (chest - grip).normalized()]
+		else:
+			out = [stab[0] + push, stab[1]]
 		_cut_kick = 1.0 - p * 0.5
 	elif _sp_t < _sp_end(3):
 		var p := (_sp_t - _sp_end(2)) / (_sp_end(3) - _sp_end(2))
