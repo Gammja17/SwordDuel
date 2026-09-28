@@ -9,27 +9,33 @@ extends Node3D
 ##     blade does nothing.
 ##   - WORLD speed: swing plus footwork. It sets how hard a cut lands (stepping into a
 ##     cut adds power) and, against the other blade, whether the contact is a clash.
-## A real swing also needs travel (swing_arc): small wiggles, however fast, neither
-## cut nor parry. Blades meeting fast -> see clash(); meeting slowly -> they lock in a
+## A real swing also needs travel (swing_arc, measured from where the swing began):
+## small wiggles, however fast, neither cut nor parry. Blades meeting fast -> see clash(); meeting slowly -> they lock in a
 ## bind, which combat.gd runs as a pushing contest.
 
 signal cut_registered(strength: float, pos: Vector3)
 signal clash_registered(pos: Vector3, result: String)  # see clash()
+signal weak_touch(pos: Vector3)   # the blade reached their body without a real swing
 
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 const Fx := preload("res://fx.gd")
+const Trail := preload("res://trail.gd")
 
 const REACH := SwordMesh.REACH
 const CUT_THRESHOLD := 3.0    # swing speed below which the blade doesn't cut
 const CLASH_THRESHOLD := 4.0  # blade-vs-blade relative speed above this = clash, below = bind
 const PARRY_SPEED := 2.5      # our own swing speed that turns meeting an attack into a parry
-const CUT_ARC := 0.30         # net tip travel (m, over ARC_FRAMES) a cut needs
-const PARRY_ARC := 0.15       # ... and a parry
-const ARC_FRAMES := 11
+const CUT_ARC := 0.22         # tip travel (m) since the swing began that a cut needs
+const PARRY_ARC := 0.12       # ... and a parry
+const SWING_START := 1.5      # swing speed at which a swing begins (below it, it ends)
+const CUT_POWER := 0.72       # tip speed -> cut strength (keeps damage where it was before the blade got quicker)
 const HIT_COOLDOWN := 0.35    # delay before the same swing can cut again
 const CLASH_LOCK := 0.25      # after a clash the blade is bouncing; no cut/clash
 const SWING_SOUND_SPEED := 6.0
+# At rest the edge turns up (and a little right): the blade is seen edge-on, as when
+# really holding a guard, not as a flat plank.
+const REST_EDGE := Vector3(0.35, 1.0, 0.0)
 
 # Blade state read by combat.gd, world space. The edge runs from base (front of the
 # crossguard) to tip; prev_* are last frame's positions.
@@ -50,7 +56,11 @@ var _edge_local := Vector3.RIGHT
 var _has_prev := false
 var _swing_cd := 0.0
 var _cut_cd := 0.0
-var _arc_hist: Array[Vector3] = []
+var _swing_live := false
+var _swing_origin := Vector3.ZERO   # tip (body space) where the current swing began
+var _swing_heading := Vector3.ZERO
+var _weak_cd := 0.0
+var _trail
 
 
 func get_tip_speed() -> float:
@@ -79,6 +89,8 @@ func is_real_swing(min_speed: float, min_arc: float) -> bool:
 
 func _ready() -> void:
 	add_child(SwordMesh.build(Armor.blade(), Armor.dark_steel(), Armor.leather(), false))
+	_trail = Trail.new()
+	add_child(_trail)
 
 
 ## Called by the player each physics frame with the grip point (right hand) and the
@@ -100,6 +112,9 @@ func drive(grip_world: Vector3, dir_world: Vector3, delta: float) -> void:
 		if swing_local.length() > 0.002:
 			# The cutting edge leads the cut.
 			_edge_local = _edge_local.lerp(swing_local.normalized(), 0.35).normalized()
+		if swing_speed < SWING_START:
+			_edge_local = _edge_local.lerp(REST_EDGE.normalized(), 0.06).normalized()
+		_track_swing(swing_local)
 		prev_base = base
 		prev_tip = tip
 	else:
@@ -109,13 +124,11 @@ func drive(grip_world: Vector3, dir_world: Vector3, delta: float) -> void:
 	tip = new_tip
 	_tip_local_prev = tip_local
 	_has_prev = true
-	_arc_hist.append(tip_local)
-	if _arc_hist.size() > ARC_FRAMES:
-		_arc_hist.pop_front()
-	swing_arc = (tip_local - _arc_hist[0]).length()
+	swing_arc = (tip_local - _swing_origin).length() if _swing_live else 0.0
 
 	clash_lock = maxf(clash_lock - delta, 0.0)
 	_cut_cd -= delta
+	_weak_cd -= delta
 
 	global_transform = Transform3D(Armor.blade_basis(dir, body.global_transform.basis * _edge_local), grip_world)
 
@@ -123,6 +136,27 @@ func drive(grip_world: Vector3, dir_world: Vector3, delta: float) -> void:
 	if swing_speed > SWING_SOUND_SPEED and swing_arc > CUT_ARC and _swing_cd <= 0.0:
 		_swing_cd = 0.35
 		Sfx.play("swing", tip, lerpf(-8.0, 0.0, clampf((swing_speed - 6.0) / 6.0, 0.0, 1.0)))
+
+	# The streak shows when a swing is strong enough to cut.
+	var cutting := 0.0
+	if clash_lock <= 0.0 and swing_arc >= CUT_ARC:
+		cutting = clampf((swing_speed - CUT_THRESHOLD * 0.8) / CUT_THRESHOLD, 0.0, 1.0)
+	_trail.push(base, tip, cutting)
+
+
+## A swing starts when the tip speeds up and lasts while it keeps going the same way;
+## slowing down or reversing ends it, so a wiggle never builds up travel.
+func _track_swing(step: Vector3) -> void:
+	if swing_speed < SWING_START or step.length() < 0.0001:
+		_swing_live = false
+		return
+	var d := step.normalized()
+	if not _swing_live or d.dot(_swing_heading) < -0.2:
+		_swing_live = true
+		_swing_origin = _tip_local_prev
+		_swing_heading = d
+	else:
+		_swing_heading = _swing_heading.lerp(d, 0.3).normalized()
 
 
 ## combat.gd: our blade met theirs at speed. Returns what it was:
@@ -197,10 +231,20 @@ func release_bind() -> void:
 	binding = false
 
 
+## combat.gd: the blade reached their body, but too slowly or too short to cut.
+func touch_weakly(point: Vector3) -> void:
+	if _weak_cd > 0.0:
+		return
+	_weak_cd = 0.6
+	Sfx.play("armor", point, -6.0)
+	weak_touch.emit(point)
+
+
 ## combat.gd: our swinging blade reached their body.
 func try_cut(body: Node, point: Vector3) -> void:
 	if _cut_cd > 0.0:
 		return
 	_cut_cd = HIT_COOLDOWN
-	body.receive_cut(tip_speed, point, _swing_dir)
-	cut_registered.emit(tip_speed, point)
+	var strength := tip_speed * CUT_POWER
+	body.receive_cut(strength, point, _swing_dir)
+	cut_registered.emit(strength, point)

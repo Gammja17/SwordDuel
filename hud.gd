@@ -273,12 +273,12 @@ func _build_player_box() -> void:
 	_player_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_player_box)
 
-	_breath_fill = _bar(_player_box, Vector2(0, 8), Vector2(300, 6), Color(0.55, 0.75, 0.9))
-	_guard_fill = _bar(_player_box, Vector2(0, 26), Vector2(300, 7), GOLD)
+	_breath_fill = _bar(_player_box, Vector2(0, 4), Vector2(300, 6), Color(0.55, 0.75, 0.9))
+	_guard_fill = _bar(_player_box, Vector2(0, 24), Vector2(300, 7), GOLD)
 	_hp_fill = _bar(_player_box, Vector2(0, 44), Vector2(300, 9), Color(0.72, 0.14, 0.12))
-	_side_label(_player_box, "숨", Vector2(-54, 0))
-	_side_label(_player_box, "자세", Vector2(-54, 18))
-	_side_label(_player_box, "체력", Vector2(-54, 37))
+	_side_label(_player_box, "숨", 7.0)
+	_side_label(_player_box, "자세", 27.5)
+	_side_label(_player_box, "체력", 48.5)
 
 
 func _build_bind_box() -> void:
@@ -496,11 +496,17 @@ func _bar(parent: Control, pos: Vector2, size: Vector2, color: Color) -> ColorRe
 	return fill
 
 
-func _side_label(parent: Control, text: String, pos: Vector2) -> void:
+## A small name to the left of a bar, centred on it (centre_y: the bar's middle).
+func _side_label(parent: Control, text: String, centre_y: float) -> void:
 	var l := Label.new()
 	l.text = text
-	l.position = pos
-	l.add_theme_font_size_override("font_size", 15)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 13)
+	l.add_theme_constant_override("outline_size", 4)
+	l.size = Vector2(44, 20)
+	l.position = Vector2(-52, centre_y - 10.0)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(l)
 
 

@@ -18,6 +18,7 @@ const BodyScript := preload("res://knight_body.gd")
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 const Fx := preload("res://fx.gd")
+const Trail := preload("res://trail.gd")
 
 const GRAVITY := 18.0
 const POISE_RANGE := 2.0     # hold the guard here: just outside the player's resting reach
@@ -49,6 +50,7 @@ var _player: Node3D
 var _sword            # the player's Sword (untyped: read dynamically)
 var _drill := ""      # practice behaviour: "", "idle", "open", "attack", "bind"
 var _body
+var _trail
 
 var _state: int = State.IDLE
 var _timer := 0.0
@@ -95,6 +97,9 @@ func _ready() -> void:
 	add_child(col)
 	_body = BodyScript.new()
 	add_child(_body)
+	_trail = Trail.new()
+	_trail.color = Color(1.0, 0.55, 0.42, 0.4)
+	add_child(_trail)
 
 
 func setup(player: Node3D, tier: Dictionary) -> void:
@@ -187,6 +192,8 @@ func refresh_blade(delta: float) -> void:
 	blade_base = new_base
 	blade_tip = new_tip
 	_has_blade = true
+	if _trail != null:
+		_trail.push(blade_base, blade_tip, 1.0 if is_striking() else 0.0)
 
 
 ## A cut from the player's sword landed.

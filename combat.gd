@@ -92,6 +92,11 @@ func _physics_process(delta: float) -> void:
 				ps.clash(hit.point, opponent, opponent.blade_tip_vel)
 			else:
 				ps.try_cut(opponent, hit.point)
+	elif ps.swing_speed > 1.0 and not opponent.is_dodging():
+		# Moving, but not a real cut: say so, instead of letting it pass unnoticed.
+		var weak := _swept_body(ps.prev_base, ps.prev_tip, ps.base, ps.tip, opponent.global_position, 0.32)
+		if weak.found:
+			ps.touch_weakly(weak.point)
 
 	# Its cut (a well-timed dodge makes it pass through). Holding guard (right mouse)
 	# turns a cut that reaches us into a parry if it was just pressed, else a block.

@@ -51,7 +51,7 @@ const TIERS := [
 	{
 		"kicker": "마지막 상대",
 		"name": "검술사범 무진",
-		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 찌르기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
+		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 달려들며 베기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
 		"hp": 120.0, "windup": 0.36, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
 		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "lunge"], "dodge": 0.25, "parry_window": 0.14, "windup_jitter": 0.3,
 		"feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5, "damage": 0.85,
@@ -328,6 +328,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.camera().current = true
 	_player.sword.cut_registered.connect(_on_cut)
 	_player.sword.clash_registered.connect(_on_clash)
+	_player.sword.weak_touch.connect(_on_weak_touch)
 	_player.hurt.connect(_on_player_hurt)
 	_player.lock_changed.connect(_on_lock_changed)
 	_player.died.connect(_on_player_died)
@@ -459,6 +460,7 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 
 func _on_cut(strength: float, _pos: Vector3) -> void:
 	_stats["cuts"] += 1
+	_player.add_trauma(0.14)   # the blow jolts back through the hands
 	var armor := float(_opponent.tier_value("armor", 1.5)) if is_instance_valid(_opponent) else 0.0
 	if strength - armor < 3.5:
 		_hud.popup("얕다", Color(0.75, 0.75, 0.72))   # the plate took it
@@ -470,6 +472,12 @@ func _on_cut(strength: float, _pos: Vector3) -> void:
 		_hitstop(0.07)
 	if _step_id() == "cut":
 		_practice_success()
+
+
+func _on_weak_touch(_pos: Vector3) -> void:
+	_hud.popup("약하다", Color(0.75, 0.75, 0.72))
+	if _step_id() == "cut":
+		_hint_once("p_weak", "닿기만 했어요. 더 크고 빠르게 휘두르세요")
 
 
 func _on_player_hurt(_amount: float) -> void:
@@ -726,6 +734,10 @@ func _build_world() -> void:
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.62, 0.55, 0.50)
 	env.fog_density = 0.008
+	env.fog_sky_affect = 0.15   # a haze on the horizon; the sunset sky shows through
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.12
 	env.glow_enabled = true
 	env.glow_intensity = 0.6
 	env.glow_bloom = 0.05

@@ -15,13 +15,16 @@ const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 
 const SPEED := 3.2          # stepping in (W)
-const BACK_SPEED := 2.1     # stepping back (S): slower, so distance alone rarely saves you
-const STRAFE_SPEED := 2.0   # circling while locked on (A/D)
+const BACK_SPEED := 2.3     # stepping back (S): slower, so distance alone rarely saves you
+const STRAFE_SPEED := 2.6   # circling while locked on (A/D)
 const GRAVITY := 18.0
 
 const EYE := Vector3(0.0, 1.62, 0.0)
-const CHEST := Vector3(0.0, 1.30, -0.05)
-const GRIP_RADIUS := 0.36   # the hands travel on a sphere this far out from the chest
+# The hands travel on a sphere around a point low and to the right of the chest, so at
+# rest the hilt sits at the bottom right of the view and the blade rises toward the
+# opponent, instead of sticking straight out of the middle of the screen.
+const GRIP_CENTER := Vector3(0.17, 1.13, -0.02)
+const GRIP_RADIUS := 0.36
 const SHOULDER_R := Vector3(0.19, 1.40, 0.02)
 const SHOULDER_L := Vector3(-0.19, 1.40, 0.02)
 const UPPER_ARM := 0.33
@@ -40,11 +43,12 @@ const FREE_PITCH := 0.6
 const FACE_RATE := 20.0   # how quickly the body swings round to the target when locked
 
 # Weight of the sword: the point chases the mouse on a spring whose acceleration and
-# speed are capped. A real cut needs a wind-up, and a hard swing can't reverse at once.
-const AIM_STIFFNESS := 220.0
-const AIM_DAMPING := 25.0
-const AIM_MAX_ACCEL := 55.0
-const AIM_MAX_SPEED := 7.5
+# speed are capped. It keeps up with the hand, but a hard swing carries on a little
+# past where the mouse stopped and can't reverse at once.
+const AIM_STIFFNESS := 420.0
+const AIM_DAMPING := 31.0
+const AIM_MAX_ACCEL := 120.0
+const AIM_MAX_SPEED := 11.0
 
 # Breath: every full swing costs some. Out of breath, the sword feels heavy (slower to
 # accelerate, lower top speed, so weaker cuts) until you stop swinging for a moment.
@@ -61,11 +65,13 @@ const DODGE_IFRAMES := Vector2(0.02, 0.22)   # untouchable between these times i
 const DODGE_COST := 25.0
 const DODGE_COOLDOWN := 0.55
 
-# Right mouse: the blade snaps toward the incoming blade. Its first moments are a timed
-# PARRY window; holding it after that is just a BLOCK (fills the guard meter).
+# Right mouse: the blade leans toward the incoming blade (the mouse still steers it).
+# Its first moments are a timed PARRY window; holding it after that is just a BLOCK
+# (fills the guard meter).
 const PARRY_WINDOW := 0.2
 const GUARD_COST := 6.0
-const GUARD_SNAP := 2.2	  # how much faster the blade moves while guarding
+const GUARD_SNAP := 1.6	  # how much faster the blade moves while guarding
+const GUARD_PULL := 0.45  # how far it leans from the mouse toward their blade
 
 # Guard (posture): every plain BLOCK fills it; parries don't. When it fills, the guard
 # breaks — blade knocked low, control sluggish — so blocking alone can't hold forever.
@@ -92,6 +98,9 @@ var _aim_target := AIM_REST
 var _aim_vel := Vector2.ZERO
 var _bind_push := 0.0
 var _deflect_timer := 0.0   # after a clash the blade bounces and control is damped
+var _deflect_damp := 1.0    # ... to this share of the mouse
+var _guard_goal := Vector2.ZERO
+var _guard_pull := 0.0
 var _since_block := 0.0
 var _since_swing := 0.0
 var _swinging := false
@@ -125,7 +134,7 @@ func _ready() -> void:
 
 	_cam = Camera3D.new()
 	_cam.position = EYE
-	_cam.fov = 68.0
+	_cam.fov = 74.0
 	_cam.near = 0.02
 	add_child(_cam)
 	_cam.current = true
@@ -179,7 +188,7 @@ func _input(event: InputEvent) -> void:
 ## Mouse movement (pixels) steers the blade's point. With the lock-on off, whatever
 ## would carry it past the edge of its range turns the body or tilts the view instead.
 func steer(relative: Vector2) -> void:
-	var damp := 0.25 if _deflect_timer > 0.0 else 1.0
+	var damp := _deflect_damp if _deflect_timer > 0.0 else 1.0
 	var nx := _aim_target.x + relative.x * AIM_SENS * damp
 	var ny := _aim_target.y - relative.y * AIM_SENS * damp
 	if not locked:
@@ -196,11 +205,12 @@ func toggle_lock() -> void:
 
 
 ## Called on a clash: kick the blade (it bounces) and damp control briefly.
-func deflect(kick: Vector2, duration: float = 0.18) -> void:
+func deflect(kick: Vector2, duration: float = 0.12, damp: float = 0.6) -> void:
 	_aim = _clamp_aim(_aim + kick)
 	_aim_target = _clamp_aim(_aim_target + kick)
 	_aim_vel = kick * 4.0
 	_deflect_timer = duration
+	_deflect_damp = damp
 	add_trauma(0.18)
 
 
@@ -209,7 +219,7 @@ func deflect(kick: Vector2, duration: float = 0.18) -> void:
 func absorb_block(h: float) -> bool:
 	if _add_posture(BLOCK_POSTURE, h):
 		return true
-	deflect(Vector2(h * 0.45, 0.25), 0.35)    # knocked open, but still in the fight
+	deflect(Vector2(h * 0.45, 0.25), 0.25)    # knocked open, but still in the fight
 	return false
 
 
@@ -217,7 +227,7 @@ func absorb_block(h: float) -> bool:
 func get_parried(h: float) -> bool:
 	if _add_posture(PARRIED_POSTURE, h):
 		return true
-	deflect(Vector2(h * 0.75, -0.35), 0.5)
+	deflect(Vector2(h * 0.75, -0.35), 0.35, 0.45)
 	add_trauma(0.2)
 	return false
 
@@ -227,7 +237,7 @@ func _add_posture(amount: float, h: float) -> bool:
 	_since_block = 0.0
 	if posture >= POSTURE_MAX:
 		posture = 0.0
-		deflect(Vector2(h * 0.8, -0.7), 0.9)  # blade thrown low; slow to bring back
+		deflect(Vector2(h * 0.8, -0.7), 0.9, 0.3)  # blade thrown low; slow to bring back
 		add_trauma(0.35)
 		return true
 	return false
@@ -393,6 +403,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_update_breath(delta)
+	_guard_pull = 0.0
 	if _guard_held and not in_bind:
 		_track_incoming_blade()
 	if not in_bind:
@@ -401,7 +412,7 @@ func _physics_process(delta: float) -> void:
 	# Sword: the point goes where it has been steered; the hands follow on a sphere
 	# around the chest, so reaching high/wide also moves the arms.
 	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z)
-	var grip := CHEST + (aim_pt - CHEST).normalized() * GRIP_RADIUS
+	var grip := GRIP_CENTER + (aim_pt - GRIP_CENTER).normalized() * GRIP_RADIUS
 	var dir := (aim_pt - grip).normalized()
 	sword.drive(to_global(grip), global_transform.basis * dir, delta)
 	var blade_basis := sword.transform.basis
@@ -432,19 +443,21 @@ func _strength() -> float:
 	return k * (GUARD_SNAP if _guard_held else 1.0)
 
 
-## While guarding, the blade goes to meet the opponent's blade: aim at its middle.
+## While guarding, the blade leans toward the middle of the opponent's blade.
 func _track_incoming_blade() -> void:
 	if target == null or not target.has_method("get_blade_vel"):
 		return
 	var mid: Vector3 = (target.get("blade_base") + target.get("blade_tip")) * 0.5
 	var local := to_local(mid)
-	_aim_target = _clamp_aim(Vector2(local.x, local.y))
+	_guard_goal = _clamp_aim(Vector2(local.x, local.y))
+	_guard_pull = GUARD_PULL
 
 
 ## The blade's point chases the mouse target with capped acceleration and speed.
 func _step_aim(delta: float) -> void:
 	var k := _strength()
-	var acc := (_aim_target - _aim) * AIM_STIFFNESS - _aim_vel * AIM_DAMPING
+	var goal := _aim_target.lerp(_guard_goal, _guard_pull)
+	var acc := (goal - _aim) * AIM_STIFFNESS - _aim_vel * AIM_DAMPING
 	if acc.length() > AIM_MAX_ACCEL * k:
 		acc = acc.normalized() * AIM_MAX_ACCEL * k
 	_aim_vel += acc * delta
@@ -483,8 +496,8 @@ func _update_camera(delta: float, moving: float) -> void:
 	_pitch = lerp_angle(_pitch, look_pitch, clampf(delta * 6.0, 0.0, 1.0))
 
 	# A little sway toward where the blade is, a walking bob, and impact shake.
-	var sway_yaw := -_aim.x * deg_to_rad(2.5)
-	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(2.5)
+	var sway_yaw := -_aim.x * deg_to_rad(6.0)
+	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(6.0)
 	_trauma = maxf(_trauma - delta * 1.8, 0.0)
 	var shake := _trauma * _trauma
 	var bob_amount := clampf(moving / SPEED, 0.0, 1.0)
