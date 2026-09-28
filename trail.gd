@@ -2,9 +2,9 @@ extends MeshInstance3D
 ## A fading ribbon behind a blade: the last few positions of its edge (base to tip),
 ## drawn only while the blade is really cutting. Lives in world space.
 
-const LENGTH := 9   # samples kept
-
 var color := Color(1.0, 1.0, 1.0, 0.35)
+var length := 9     # samples kept
+var substeps := 1   # samples per push: more keeps a fast, wide arc smooth
 var _im := ImmediateMesh.new()
 var _samples: Array = []   # [base, tip, strength 0..1]
 
@@ -25,8 +25,14 @@ func _init() -> void:
 ## Called once per physics frame with the blade's world position and how strongly it
 ## is cutting (0 = not at all).
 func push(base: Vector3, tip: Vector3, strength: float) -> void:
+	if substeps > 1 and not _samples.is_empty():
+		var last: Array = _samples[-1]
+		for k in range(1, substeps):
+			var u := float(k) / substeps
+			_samples.append([(last[0] as Vector3).lerp(base, u), (last[1] as Vector3).lerp(tip, u),
+				lerpf(last[2], strength, u)])
 	_samples.append([base, tip, strength])
-	if _samples.size() > LENGTH:
+	while _samples.size() > length:
 		_samples.pop_front()
 	_im.clear_surfaces()
 	var lit := false

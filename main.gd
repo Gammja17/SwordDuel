@@ -52,7 +52,7 @@ const TIERS := [
 		"kicker": "마지막 상대",
 		"name": "검술사범 무진",
 		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 달려들며 베기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
-		"hp": 95.0, "windup": 0.40, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
+		"hp": 100.0, "windup": 0.40, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
 		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "lunge"], "dodge": 0.25, "parry_window": 0.14, "windup_jitter": 0.2,
 		"feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5, "damage": 0.72,
 		"armor": 3.0, "flinch_speed": 11.0,

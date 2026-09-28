@@ -27,7 +27,7 @@ const BIND_RATE := 1.6        # balance change per second per unit of net push
 const BIND_PUSH_DECAY := 1.5  # the player's push fades unless they keep pushing
 const BIND_TELL := 0.4        # shiver before the opponent switches sides
 const BIND_TIMEOUT := 6.0
-const DODGE_CLEAR_MS := 350   # blades pass each other this long after a dodge starts
+const DODGE_CLEAR_MS := 500   # blades pass each other this long after a dodge starts
 
 var player: Node3D
 var opponent: Node3D

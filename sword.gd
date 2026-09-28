@@ -30,7 +30,8 @@ const CUT_ARC := 0.22         # tip travel (m) since the swing began that a cut 
 const PARRY_ARC := 0.12       # ... and a parry
 const SWING_START := 1.5      # swing speed at which a swing begins (below it, it ends)
 const CUT_POWER := 0.72       # tip speed -> cut strength (keeps damage where it was before the blade got quicker)
-const CUT_MAX := 9.5         # ... up to this: a full swinging cut is no deadlier than a fast steered one
+const CUT_MAX := 9.5         # ... up to this for a big swing (the player's committed cut)
+const DRAG_MAX := 6.0         # ... and this for a blade only dragged by the mouse, however fast
 const HIT_COOLDOWN := 0.35    # delay before the same swing can cut again
 const CLASH_LOCK := 0.25      # after a clash the blade is bouncing; no cut/clash
 const SWING_SOUND_SPEED := 6.0
@@ -91,6 +92,9 @@ func is_real_swing(min_speed: float, min_arc: float) -> bool:
 func _ready() -> void:
 	add_child(SwordMesh.build(Armor.blade(), Armor.dark_steel(), Armor.leather(), false))
 	_trail = Trail.new()
+	_trail.color = Color(1.0, 0.96, 0.88, 0.55)
+	_trail.length = 30
+	_trail.substeps = 3
 	add_child(_trail)
 
 
@@ -102,6 +106,8 @@ func drive(grip_world: Vector3, dir_world: Vector3, delta: float) -> void:
 	var new_tip := grip_world + dir * REACH
 	var new_base := grip_world + dir * SwordMesh.BLADE_START
 	var tip_local := body.to_local(new_tip)
+	if body.has_method("roll_offset"):
+		tip_local += body.roll_offset()   # a roll carries the blade down with the body: not a swing
 	if _has_prev:
 		var dt := maxf(delta, 0.0001)
 		tip_vel = (new_tip - tip) / dt
@@ -138,10 +144,10 @@ func drive(grip_world: Vector3, dir_world: Vector3, delta: float) -> void:
 		_swing_cd = 0.35
 		Sfx.play("swing", tip, lerpf(-8.0, 0.0, clampf((swing_speed - 6.0) / 6.0, 0.0, 1.0)))
 
-	# The streak shows when a swing is strong enough to cut.
+	# The streak shows on any fast movement, fully on a swing strong enough to cut.
 	var cutting := 0.0
-	if clash_lock <= 0.0 and swing_arc >= CUT_ARC:
-		cutting = clampf((swing_speed - CUT_THRESHOLD * 0.8) / CUT_THRESHOLD, 0.0, 1.0)
+	if clash_lock <= 0.0:
+		cutting = clampf((swing_speed - CUT_THRESHOLD) / 5.0, 0.0, 1.0) * (1.0 if swing_arc >= CUT_ARC else 0.5)
 	_trail.push(base, tip, cutting)
 
 
@@ -246,6 +252,8 @@ func try_cut(body: Node, point: Vector3) -> void:
 	if _cut_cd > 0.0:
 		return
 	_cut_cd = HIT_COOLDOWN
-	var strength := minf(tip_speed * CUT_POWER, CUT_MAX)
+	var p := get_parent()
+	var big: bool = p != null and p.has_method("is_big_swing") and p.is_big_swing()
+	var strength := minf(tip_speed * CUT_POWER, CUT_MAX if big else DRAG_MAX)
 	body.receive_cut(strength, point, _swing_dir)
 	cut_registered.emit(strength, point)

@@ -23,21 +23,24 @@ const STRAFE_SPEED := 2.6   # circling while locked on (A/D)
 const GRAVITY := 18.0
 
 const EYE := Vector3(0.0, 1.62, 0.0)
-# The hands travel on a sphere around a point low and to the right of the chest, so at
+# The hands follow the mouse across a wide area in front of the body (left to right as
+# far as the arms reach, belt to face), bending in toward the chest at the edges. At
 # rest the hilt sits at the bottom right of the view and the blade rises toward the
-# opponent, instead of sticking straight out of the middle of the screen.
-const GRIP_CENTER := Vector3(0.17, 1.13, -0.02)
-const GRIP_RADIUS := 0.36
+# opponent; the blade always points on out to where the mouse aims.
+const HANDS_REST := Vector3(0.14, 1.26, -0.5)
+const HANDS_SPAN := Vector2(0.42, 0.5)   # hand travel per metre of aim
+const HANDS_REACH := 0.62                # at most this far from the right shoulder
 const SHOULDER_R := Vector3(0.19, 1.40, 0.02)
 const SHOULDER_L := Vector3(-0.19, 1.40, 0.02)
 const UPPER_ARM := 0.33
 const FOREARM := 0.31
 
-# The blade's point is steered across a plane this far in front of the chest.
-const AIM_PLANE_Z := -0.9
-const AIM_SENS := 0.0038
-const AIM_MIN := Vector2(-0.85, 0.55)
-const AIM_MAX := Vector2(0.85, 2.05)
+# The blade's point is steered across a plane this far in front of the chest (far
+# enough that a low aim still reaches forward rather than straight down).
+const AIM_PLANE_Z := -1.3
+const AIM_SENS := 0.0045
+const AIM_MIN := Vector2(-1.25, 0.45)
+const AIM_MAX := Vector2(1.25, 2.4)
 const AIM_REST := Vector2(0.0, 1.45)   # point toward the opponent's face
 # With the lock-on off, steering the blade past the edge of its range turns the body
 # (sideways) or tilts the view (up and down): radians per metre of overshoot.
@@ -54,15 +57,17 @@ const FACE_RATE := 20.0   # how quickly the body swings round to the target when
 # body steps in. Right-click pulls out of it (a feint).
 const FLICK := 0.3
 const FLICK_DECAY := 12.0
-const CUT_DRAW := 0.1
-const CUT_SWING := 0.22
-const CUT_HOLD := 0.08
-const CUT_RETURN := 0.2
-const CUT_FROM := -100.0
-const CUT_TO := 80.0
+const CUT_DRAW := 0.13
+const CUT_HANG := 0.04     # a beat at the top of the draw before it lets go
+const CUT_SWING := 0.12
+const CUT_HOLD := 0.1
+const CUT_RETURN := 0.22
+const CUT_FROM := -125.0
+const CUT_TO := 105.0
+const CUT_OVER := 14.0     # the follow-through carries this much further and springs back
 const CUT_PIVOT := Vector3(0.05, 1.32, -0.1)   # between the shoulders, a little forward
-const CUT_TWIST := 0.24    # how far the shoulders and view turn each way (rad)
-const CUT_STEP := 1.8      # step into the cut (m/s at its start, fading)
+const CUT_TWIST := 0.42    # how far the shoulders and view turn each way (rad)
+const CUT_STEP := 3.0      # step into the cut (m/s at its start, fading)
 const CUT_GAP := 0.2       # a new cut can start this soon after one returns
 const CUT_BREATH := 30.0   # below this much breath, there is no strength for a cut
 const CUT_COST := 10.0     # breath a big swing costs on top of any full swing's
@@ -70,10 +75,11 @@ const CUT_COST := 10.0     # breath a big swing costs on top of any full swing's
 # Weight of the sword: the point chases the mouse on a spring whose acceleration and
 # speed are capped. It keeps up with the hand, but a hard swing carries on a little
 # past where the mouse stopped and can't reverse at once.
-const AIM_STIFFNESS := 420.0
-const AIM_DAMPING := 31.0
-const AIM_MAX_ACCEL := 120.0
-const AIM_MAX_SPEED := 11.0
+const AIM_STIFFNESS := 900.0
+const AIM_DAMPING := 45.0
+const AIM_MAX_ACCEL := 260.0
+const AIM_MAX_SPEED := 20.0
+const WHIP := 0.07   # a fast drag flings the point ahead of the hands, this far per m/s
 
 # Breath: every full swing costs some. Out of breath, the sword feels heavy (slower to
 # accelerate, lower top speed, so weaker cuts) until you stop swinging for a moment.
@@ -83,12 +89,14 @@ const BREATH_REGEN := 35.0          # per second
 const BREATH_REGEN_DELAY := 0.5     # after the last swing
 const TIRED_BELOW := 35.0
 
-# Dodge (Space): a quick step in the held direction (back if none), briefly untouchable.
-const DODGE_SPEED := 6.5
-const DODGE_TIME := 0.3
-const DODGE_IFRAMES := Vector2(0.02, 0.22)   # untouchable between these times into the dodge
+# Dodge (Space): a roll in the held direction (back if none), about 2.8 m, untouchable
+# through its middle. The view drops toward the ground and tips the way it rolls.
+const DODGE_SPEED := 9.0
+const DODGE_TIME := 0.5
+const DODGE_IFRAMES := Vector2(0.03, 0.33)   # untouchable between these times into the dodge
 const DODGE_COST := 25.0
-const DODGE_COOLDOWN := 0.55
+const DODGE_COOLDOWN := 0.75
+const DODGE_DIP := 0.55      # how far the eyes (and the sword with them) drop mid-roll
 
 # Right mouse: the blade leans toward the incoming blade (the mouse still steers it).
 # Its first moments are a timed PARRY window; holding it after that is just a BLOCK
@@ -136,6 +144,7 @@ var _cut_back := []         # [grip, dir] the return starts from
 var _cut_now := []          # [grip, dir] where the cut has the blade this frame
 var _cut_twist := 0.0       # -1 drawn back .. +1 followed through (turns the view)
 var _cut_kick := 0.0        # 1 at the height of the swing
+var _cut_whoosh := false
 var _cut_gap := 0.0
 var _since_block := 0.0
 var _since_swing := 0.0
@@ -423,16 +432,18 @@ func _physics_process(delta: float) -> void:
 	var local := input_dir.normalized()
 	local.x *= STRAFE_SPEED
 	local.z *= SPEED if local.z < 0.0 else BACK_SPEED
-	if _cut_t >= 0.0 and _cut_t < CUT_DRAW + CUT_SWING and input_dir.z <= 0.0:
-		local.z -= CUT_STEP * (1.0 - _cut_t / (CUT_DRAW + CUT_SWING))   # step into the cut
+	if _cut_t >= 0.0 and _cut_t < _swing_end() and input_dir.z <= 0.0:
+		local.z -= CUT_STEP * (1.0 - _cut_t / _swing_end())   # step into the cut
 	var move := global_transform.basis * local
 	if _dodge_t >= 0.0:
 		# A dodge overrides walking: fast at first, easing off.
 		_dodge_t += delta
 		var k := 1.0 - clampf(_dodge_t / DODGE_TIME, 0.0, 1.0)
-		move = global_transform.basis * _dodge_dir * DODGE_SPEED * (0.35 + 0.65 * k)
+		move = global_transform.basis * _dodge_dir * DODGE_SPEED * (0.25 + 0.75 * k)
 		if _dodge_t >= DODGE_TIME:
 			_dodge_t = -1.0
+			Sfx.play_flat("armor", -3.0)   # back on the feet
+			add_trauma(0.12)
 	velocity.x = move.x
 	velocity.z = move.z
 	if is_on_floor():
@@ -456,19 +467,21 @@ func _physics_process(delta: float) -> void:
 		_track_incoming_blade()
 	if not in_bind:
 		_watch_flick(delta)
-		if _cut_t < 0.0 or _cut_t >= CUT_DRAW + CUT_SWING + CUT_HOLD:
+		if _cut_t < 0.0 or _cut_t >= _hold_end():
 			_step_aim(delta)
 
-	# Sword: the point goes where it has been steered; the hands follow on a sphere
-	# around the chest, so reaching high/wide also moves the arms. A cut takes over.
+	# Sword: the hands go where the mouse steers them and the blade points on to the
+	# aim (see _held_pose). A cut takes over.
 	var held := _held_pose()
 	var pose := held if _cut_t < 0.0 else _cut_pose(delta, held)
 	var grip: Vector3 = pose[0]
 	var dir: Vector3 = pose[1]
+	var dip := roll_offset()   # the whole upper body goes down with a roll
+	grip = _within_reach(grip) - dip
 	sword.drive(to_global(grip), global_transform.basis * dir, delta)
 	var blade_basis := sword.transform.basis
-	_arm_r.pose(SHOULDER_R, grip, Vector3(0.7, -0.7, 0.1), blade_basis)
-	_arm_l.pose(SHOULDER_L, grip - dir * SwordMesh.LEFT_HAND, Vector3(-0.7, -0.7, 0.1), blade_basis)
+	_arm_r.pose(SHOULDER_R - dip, grip, Vector3(0.7, -0.7, 0.1), blade_basis)
+	_arm_l.pose(SHOULDER_L - dip, grip - dir * SwordMesh.LEFT_HAND, Vector3(-0.7, -0.7, 0.1), blade_basis)
 
 	_update_camera(delta, moving)
 
@@ -531,9 +544,19 @@ func _clamp_aim(a: Vector2) -> Vector2:
 
 ## The blade where the mouse holds it: [grip, dir] in body space.
 func _held_pose() -> Array:
-	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z)
-	var grip := GRIP_CENTER + (aim_pt - GRIP_CENTER).normalized() * GRIP_RADIUS
+	var off := Vector3(_aim.x * HANDS_SPAN.x, (_aim.y - AIM_REST.y) * HANDS_SPAN.y, 0.0)
+	var grip := _within_reach(HANDS_REST + off + Vector3(0.0, 0.0, 0.5 * off.length_squared()))
+	var whip := (Vector3(_aim_vel.x, _aim_vel.y, 0.0) * WHIP).limit_length(0.9)
+	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z) + whip
 	return [grip, (aim_pt - grip).normalized()]
+
+
+## The hands can't go further from the right shoulder than the arms reach.
+func _within_reach(grip: Vector3) -> Vector3:
+	var from_shoulder := grip - SHOULDER_R
+	if from_shoulder.length() > HANDS_REACH:
+		return SHOULDER_R + from_shoulder.normalized() * HANDS_REACH
+	return grip
 
 
 ## Watches the mouse for a flick (and keeps its recent heading for left-click cuts).
@@ -558,6 +581,7 @@ func request_cut(heading: Vector2) -> void:
 	_cut_side = (Vector3(heading.x, heading.y, 0.0).normalized() + Vector3(0.0, -0.2, 0.0)).normalized()
 	_cut_start = _held_pose()
 	_cut_t = 0.0
+	_cut_whoosh = false
 	breath = maxf(breath - CUT_COST, 0.0)
 	_flick = Vector2.ZERO
 	# When it is over, the blade rests on the side the cut went to.
@@ -578,9 +602,9 @@ func _click_heading() -> Vector2:
 
 ## A clash or a guard pulls out of the swing: ease back from wherever it got to.
 func _abort_cut() -> void:
-	if _cut_t >= 0.0 and _cut_t < CUT_DRAW + CUT_SWING + CUT_HOLD:
+	if _cut_t >= 0.0 and _cut_t < _hold_end():
 		_cut_back = _cut_now if not _cut_now.is_empty() else _held_pose()
-		_cut_t = CUT_DRAW + CUT_SWING + CUT_HOLD
+		_cut_t = _hold_end()
 
 
 ## The blade on the arc at `deg` degrees (0 = straight ahead): [grip, dir]. The blade
@@ -593,12 +617,12 @@ func _arc(deg: float) -> Array:
 	# Drawn back, the blade is also raised (not for cuts that are already vertical).
 	d += Vector3.UP * 0.55 * clampf(-sin(a), 0.0, 1.0) * (1.0 - absf(_cut_side.y))
 	d = d.normalized()
-	var u := inverse_lerp(CUT_FROM, CUT_TO, deg)
+	var u := clampf(inverse_lerp(CUT_FROM, CUT_TO, deg), 0.0, 1.05)
 	var back := Vector3(-_cut_side.x, 0.0, 0.0)
 	back = back.normalized() if back.length() > 0.2 else Vector3.RIGHT   # straight down: over the right shoulder
-	var h0 := CUT_PIVOT + back * 0.24 + Vector3(0.0, -_cut_side.y * 0.26 + 0.1 * (1.0 - absf(_cut_side.y)), 0.05)
-	var h1 := CUT_PIVOT + Vector3(0.0, 0.0, -0.6)
-	var h2 := CUT_PIVOT + _cut_side * 0.32 + Vector3(0.0, -0.1, -0.25)
+	var h0 := CUT_PIVOT + back * 0.4 + Vector3(0.0, -_cut_side.y * 0.36 + 0.16 * (1.0 - absf(_cut_side.y)), 0.16)
+	var h1 := CUT_PIVOT + Vector3(0.0, 0.0, -0.7)
+	var h2 := CUT_PIVOT + _cut_side * 0.5 + Vector3(0.0, -0.2, -0.3)
 	return [h0.lerp(h1, u).lerp(h1.lerp(h2, u), u), d]
 
 
@@ -611,7 +635,6 @@ func _cut_pose(delta: float, held: Array) -> Array:
 	_cut_t += delta
 	var t := _cut_t
 	var twist_from := sin(deg_to_rad(CUT_FROM))
-	var twist_to := sin(deg_to_rad(CUT_TO))
 	var out: Array
 	_cut_kick = 0.0
 	if t < CUT_DRAW:
@@ -619,22 +642,38 @@ func _cut_pose(delta: float, held: Array) -> Array:
 		out = _blend(_cut_start, _arc(CUT_FROM), p)
 		_cut_twist = twist_from * p
 		_cut_back = []
-	elif t < CUT_DRAW + CUT_SWING:
-		var p := (t - CUT_DRAW) / CUT_SWING
-		var q := p * p * (3.0 - 2.0 * p)
+	elif t < CUT_DRAW + CUT_HANG:
+		# Cocked: it draws back a touch further for a beat.
+		var deg := CUT_FROM - 6.0 * sin(PI * (t - CUT_DRAW) / CUT_HANG)
+		out = _arc(deg)
+		_cut_twist = sin(deg_to_rad(deg))
+	elif t < _swing_end():
+		if not _cut_whoosh:
+			_cut_whoosh = true
+			Sfx.play_flat("swing", 3.0)
+			sword.set("_swing_cd", 0.5)   # this one whoosh, not the blade's own as well
+			add_trauma(0.1)
+		# Heavy to start, then faster and faster right through the far side: a lash,
+		# not an even circle.
+		var p := (t - CUT_DRAW - CUT_HANG) / CUT_SWING
+		var q := pow(p, 2.2)
 		var deg := lerpf(CUT_FROM, CUT_TO, q)
 		out = _arc(deg)
 		_cut_twist = sin(deg_to_rad(deg))
-		_cut_kick = sin(PI * p)
-	elif t < CUT_DRAW + CUT_SWING + CUT_HOLD:
-		out = _arc(CUT_TO)
-		_cut_twist = twist_to
+		_cut_kick = sin(PI * 0.5 * p)
+	elif t < _hold_end():
+		# Follow-through: carries on past and springs back.
+		var h := (t - _swing_end()) / CUT_HOLD
+		_cut_kick = 1.0 - h
+		var deg := CUT_TO + CUT_OVER * sin(PI * h)
+		out = _arc(deg)
+		_cut_twist = sin(deg_to_rad(deg))
 	else:
 		if _cut_back.is_empty():
 			_cut_back = _arc(CUT_TO)
 			_aim = _aim_target   # the held blade waits where the cut ended
 			_aim_vel = Vector2.ZERO
-		var p := clampf((t - CUT_DRAW - CUT_SWING - CUT_HOLD) / CUT_RETURN, 0.0, 1.0)
+		var p := clampf((t - _hold_end()) / CUT_RETURN, 0.0, 1.0)
 		var q := p * p * (3.0 - 2.0 * p)
 		out = _blend(_cut_back, held, q)
 		_cut_twist = lerpf(_cut_twist, 0.0, q)
@@ -646,6 +685,29 @@ func _cut_pose(delta: float, held: Array) -> Array:
 			_flick = Vector2.ZERO
 	_cut_now = out
 	return out
+
+
+## A committed cut is swinging (drawn back and let go, up to its follow-through).
+func is_big_swing() -> bool:
+	return _cut_t >= CUT_DRAW and _cut_t < _hold_end()
+
+
+func _swing_end() -> float:
+	return CUT_DRAW + CUT_HANG + CUT_SWING
+
+
+func _hold_end() -> float:
+	return _swing_end() + CUT_HOLD
+
+
+## How far a roll has lowered the upper body (and the sword) right now, body space.
+func roll_offset() -> Vector3:
+	return Vector3(0.0, _dodge_dip(), 0.0)
+
+
+## How far the roll has the eyes dropped right now.
+func _dodge_dip() -> float:
+	return DODGE_DIP * sin(PI * clampf(_dodge_t / DODGE_TIME, 0.0, 1.0)) if _dodge_t >= 0.0 else 0.0
 
 
 ## Turn to face the target (quickly, so switching the lock back on swings round
@@ -670,23 +732,31 @@ func _update_camera(delta: float, moving: float) -> void:
 	# A little sway toward where the blade is, a walking bob, and impact shake. A cut
 	# turns the shoulders and so the view with it, tips it the way the blade falls and
 	# widens it for a moment.
-	var sway_yaw := -_aim.x * deg_to_rad(6.0)
+	var sway_yaw := -_aim.x * deg_to_rad(12.0)
 	# (Looking further down after a low blade, so it doesn't drop out of sight.)
-	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(6.0 if _aim.y > AIM_REST.y else 20.0)
+	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(10.0 if _aim.y > AIM_REST.y else 20.0)
 	sway_yaw += -_cut_side.x * CUT_TWIST * _cut_twist
-	sway_pitch += _cut_side.y * 0.12 * _cut_twist
-	_cam.fov = 74.0 + 7.0 * _cut_kick
+	sway_pitch += _cut_side.y * 0.2 * _cut_twist
+	_cam.fov = 74.0 + 12.0 * _cut_kick
 	_trauma = maxf(_trauma - delta * 1.8, 0.0)
 	var shake := _trauma * _trauma
 	var bob_amount := clampf(moving / SPEED, 0.0, 1.0)
 	_bob += delta * moving * 2.6
 	_cam.position = EYE + Vector3(cos(_bob) * 0.010 * bob_amount, absf(sin(_bob)) * 0.018 * bob_amount, 0.0) \
 		+ Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * 0.03 * shake \
-		+ Vector3(0.0, -0.03, -0.1) * _cut_kick   # leaning into the swing
-	var roll := _cut_side.x * 0.08 * _cut_twist
+		+ Vector3(0.0, -0.07, -0.22) * _cut_kick   # leaning into the swing
+	var roll := _cut_side.x * 0.15 * _cut_twist
+	# The view leans into a fast drag of the blade.
+	sway_yaw += clampf(-_aim_vel.x * 0.012, -0.14, 0.14)
+	sway_pitch += clampf(_aim_vel.y * 0.008, -0.1, 0.1)
+	roll += clampf(_aim_vel.x * 0.008, -0.1, 0.1)
 	if _dodge_t >= 0.0:
-		roll = -_dodge_dir.x * 0.12 * sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)
-		_cam.position.y -= 0.08 * sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)
+		# Rolling: down toward the ground, tucked (looking down) and tipped the way it
+		# goes, up again at the end.
+		var s := sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)
+		roll = -_dodge_dir.x * 0.5 * s
+		sway_pitch -= 0.35 * s
+		_cam.position.y -= _dodge_dip()
 	_cam.rotation = Vector3(
 		_pitch + sway_pitch + randf_range(-1.0, 1.0) * 0.03 * shake,
 		sway_yaw + randf_range(-1.0, 1.0) * 0.03 * shake,
