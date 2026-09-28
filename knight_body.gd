@@ -10,15 +10,18 @@ extends Node3D
 ##     (one gait at a time, so two cycles of different lengths never mix)
 ##   - upper body: held in a guard (sword raised in front) while moving, so the blade
 ##     never swings about or rests on the shoulder the way the run clips carry it
-##   - actions (attacks, parry, hits, dodges, death): full-body clips faded in on top
-##     and out again, played as time segments at chosen speeds
-##   - the left hand held on the grip below the right one by an IK chain, so the
-##     longsword is carried in two hands
+##   - actions (hits, dodges, death): full-body clips faded in on top and out again,
+##     played as time segments at chosen speeds
+## The longsword is not animated by clips: opponent.gd holds it in poses from
+## sword_poses.gd (pose()), both arms reach it by IK, the hands turn to close on the
+## grip, and the torso turns and leans with the pose (torso_turn.gd).
 ## Local frame: feet at the origin, facing -Z (the model faces +Z, so it is turned).
 
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 const HipTwist := preload("res://hip_twist.gd")
+const TorsoTurn := preload("res://torso_turn.gd")
+const GripHands := preload("res://grip_hands.gd")
 
 const BODY := "res://assets/characters/body/UAL1_Standard.glb"
 const LIBRARIES := {
@@ -39,15 +42,6 @@ const GAITS := [
 ]
 const WALK_SPEED := 0.85   # the walk's ground speed at playback 1 (m/s): its planted foot
 const JOG_SPEED := 3.2     # the jog's feet slide at any speed; kept near its own cadence
-# Some UAL sword cuts fold the body nearly double; their hips, spine and legs are pulled
-# this far back toward the standing pose (the arms and so the blade keep the clip's
-# path relative to the chest). The "A" cut keeps its low lunge, which gives it reach.
-const UPRIGHT := {"ual2/Sword_Regular_B": 0.45, "ual2/Sword_Regular_C": 0.45, "ual2/Sword_Dash": 0.45}
-const CORE_BONES := ["Hips", "Spine", "Chest", "UpperChest",
-	"LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "LeftToes",
-	"RightUpperLeg", "RightLowerLeg", "RightFoot", "RightToes"]
-# Clips where the left hand lets go of the grip.
-const ONE_HAND_CLIPS := ["Hit_Chest", "ual2/Hit_Knockback", "Death01"]
 const UPPER_BONES := ["Spine", "Chest", "UpperChest", "Neck", "Head",
 	"LeftShoulder", "LeftUpperArm", "LeftLowerArm", "LeftHand",
 	"RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand"]
@@ -62,6 +56,9 @@ const SWORD_IN_HAND := Transform3D(Basis(Vector3(0, 1, 0), Vector3(0, 0, -1), Ve
 const LEFT_WRIST := Vector3(-SwordMesh.LEFT_HAND, 0.0, 0.0)
 const LEFT_POLE := Vector3(0.5, 0.6, 0.1)     # skeleton space (the model faces +Z)
 const RIGHT_POLE := Vector3(-0.5, 0.6, 0.1)
+# Sword poses are measured from the top of the chest, found from the hips (which the
+# clips move: crouching, recoiling) so the hilt goes where the body goes.
+const HIPS_TO_CHEST := Vector3(0.0, 0.39, -0.03)
 
 # (radius, height) profiles, bottom to top, at the model's own heights.
 const HELM := [
@@ -88,21 +85,21 @@ var tree: AnimationTree
 var skeleton: Skeleton3D
 var sword: Node3D
 var _model: Node3D
-var _hand := -1
 var _steel: StandardMaterial3D
 var _flash := 0.0
-var _bound := false
 var _action_weight := 0.0
 var _action_target := 0.0
 var _action_fade := 8.0
-var _guard := 1.0
 var _action_clip := ""
 var _twist
 var _twist_target := 0.0
+var _torso
+var _grip_hands
+var _hips := -1
+var _dead := false
 var _gait := "idle"
 var _left_ik: SkeletonModifier3D
 var _right_ik: SkeletonModifier3D
-var _left_on_hand: Node3D
 var _left_on_sword: Node3D
 var _two_hands := 1.0
 
@@ -122,9 +119,11 @@ func build(tabard_color: Color, crest: bool) -> void:
 	for clip in LOOPING:
 		if ap.has_animation(clip):
 			ap.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
-	_hand = skeleton.find_bone("RightHand")
+	_hips = skeleton.find_bone("Hips")
 	_twist = HipTwist.new()
 	skeleton.add_child(_twist)
+	_torso = TorsoTurn.new()
+	skeleton.add_child(_torso)
 	_build_tree()
 	_dress(tabard_color, crest)
 	_build_grip()
@@ -210,18 +209,12 @@ func _limb(bone: String, child: String, radius: float, mat: Material) -> void:
 
 # --- two-handed grip -------------------------------------------------------------------
 
-## The left hand follows the right hand on the grip. Built from skeleton modifiers,
-## which run in child order after the animation: the hip twist, then a node that
-## tracks the right hand's final pose, then the arm IK aimed at a point below it (so
-## the hands never lag a frame apart, even mid-swing). In a bind the sword is held on
-## the crossing point instead, and both hands go to it.
+## Both hands on the grip. The sword is placed in the world (top_level) and skeleton
+## modifiers, which run in child order after the animation, bring the body to it: the
+## hip twist and torso turn, then each arm's IK to its wrist's place on the grip, then
+## the hands turned to close on it.
 func _build_grip() -> void:
-	var on_hand := ModifierBoneTarget3D.new()
-	on_hand.bone_name = "RightHand"
-	skeleton.add_child(on_hand)
-	_left_on_hand = Node3D.new()
-	_left_on_hand.position = LEFT_WRIST
-	on_hand.add_child(_left_on_hand)
+	sword.top_level = true
 	var right_wrist := SWORD_IN_HAND.affine_inverse()
 	var right_on_sword := Node3D.new()
 	right_on_sword.transform = right_wrist
@@ -229,9 +222,12 @@ func _build_grip() -> void:
 	_left_on_sword = Node3D.new()
 	_left_on_sword.transform = right_wrist.translated_local(LEFT_WRIST)
 	sword.add_child(_left_on_sword)
-	_left_ik = _arm_ik("Left", _left_on_hand, LEFT_POLE)
+	_left_ik = _arm_ik("Left", _left_on_sword, LEFT_POLE)
 	_right_ik = _arm_ik("Right", right_on_sword, RIGHT_POLE)
-	_right_ik.active = false
+	_grip_hands = GripHands.new()
+	_grip_hands.right_target = right_on_sword
+	_grip_hands.left_target = _left_on_sword
+	skeleton.add_child(_grip_hands)
 
 
 func _arm_ik(side: String, target: Node3D, pole_at: Vector3) -> SkeletonModifier3D:
@@ -281,15 +277,6 @@ func _build_tree() -> void:
 	root.add_node("action", AnimationNodeAnimation.new())
 	root.add_node("action_seek", AnimationNodeTimeSeek.new())
 	root.add_node("action_speed", AnimationNodeTimeScale.new())
-	var stand := AnimationNodeAnimation.new()
-	stand.animation = "Sword_Idle"
-	root.add_node("stand", stand)
-	root.add_node("stand_seek", AnimationNodeTimeSeek.new())
-	var upright := AnimationNodeBlend2.new()
-	upright.filter_enabled = true
-	for bone in CORE_BONES:
-		upright.set_filter_path(NodePath("%GeneralSkeleton:" + bone), true)
-	root.add_node("upright", upright)
 	root.add_node("mix", AnimationNodeBlend2.new())
 
 	for i in GAITS.size():
@@ -301,10 +288,7 @@ func _build_tree() -> void:
 	root.connect_node("action_seek", 0, "action")
 	root.connect_node("action_speed", 0, "action_seek")
 	root.connect_node("mix", 0, "stance")
-	root.connect_node("stand_seek", 0, "stand")
-	root.connect_node("upright", 0, "action_speed")
-	root.connect_node("upright", 1, "stand_seek")
-	root.connect_node("mix", 1, "upright")
+	root.connect_node("mix", 1, "action_speed")
 	root.connect_node("output", 0, "mix")
 
 	tree = AnimationTree.new()
@@ -367,11 +351,6 @@ func move(local_velocity: Vector2) -> void:
 	tree.set("parameters/loco_speed/scale", rate)
 
 
-## Raise (1) or lower (0) the guard while moving; lowered shows the clips' own arms.
-func set_guard(amount: float) -> void:
-	_guard = amount
-
-
 ## Start a full-body action: [from, to] seconds of the clip played over `duration`.
 func act(clip: String, from: float, to: float, duration: float, fade := 0.1) -> void:
 	if not ap.has_animation(clip):
@@ -382,8 +361,6 @@ func act(clip: String, from: float, to: float, duration: float, fade := 0.1) -> 
 		_action_clip = clip
 	tree.set("parameters/action_seek/seek_request", from)
 	tree.set("parameters/action_speed/scale", maxf((to - from) / maxf(duration, 0.01), 0.0))
-	_two_hands = 0.0 if clip in ONE_HAND_CLIPS else 1.0
-	tree.set("parameters/upright/blend_amount", UPRIGHT.get(clip, 0.0))
 	_action_target = 1.0
 	_action_fade = 1.0 / maxf(fade, 0.01)
 
@@ -395,7 +372,6 @@ func act_speed(scale: float) -> void:
 
 ## Fade the current action out, back to stance and footwork.
 func release(fade := 0.25) -> void:
-	_two_hands = 1.0
 	_action_target = 0.0
 	_action_fade = 1.0 / maxf(fade, 0.01)
 
@@ -408,31 +384,25 @@ func clip_length(clip: String) -> float:
 	return ap.get_animation(clip).length if ap.has_animation(clip) else 0.0
 
 
-## Where the longsword is right now (world space), straight from the skeleton so it is
-## current even before the bone attachments refresh.
+## Where the longsword is right now (world space).
 func sword_transform() -> Transform3D:
-	if _bound:
-		return sword.global_transform
-	return skeleton.global_transform * skeleton.get_bone_global_pose(_hand) * SWORD_IN_HAND
+	return sword.global_transform
 
 
-## In a bind the sword is held on the crossing point, not by the animation.
-func hold_sword(world: Transform3D) -> void:
-	if not _bound:
-		_bound = true
-		sword.top_level = true
-		_left_ik.set_target_node(0, _left_ik.get_path_to(_left_on_sword))
-		_right_ik.active = true
-	sword.global_transform = world
+## Where sword poses are measured from (the top of the chest), in body space.
+func chest_anchor() -> Vector3:
+	return to_local(skeleton.global_transform * skeleton.get_bone_global_pose(_hips).origin) + HIPS_TO_CHEST
 
 
-func release_sword() -> void:
-	if _bound:
-		_bound = false
-		sword.top_level = false
-		sword.transform = SWORD_IN_HAND
-		_left_ik.set_target_node(0, _left_ik.get_path_to(_left_on_hand))
-		_right_ik.active = false
+## Hold the sword in a pose from sword_poses.gd, and turn the torso with it.
+func pose(p: Dictionary) -> void:
+	if _dead:
+		return
+	_torso.yaw = p.yaw
+	_torso.lean = p.lean
+	# Leaning forward carries the chest, and so the hilt, forward.
+	var grip: Vector3 = chest_anchor() + p.grip + Vector3(0.0, 0.0, -HIPS_TO_CHEST.y * sin(p.lean))
+	sword.global_transform = global_transform * Transform3D(Basis(p.rot as Quaternion), grip)
 
 
 func update_body(delta: float) -> void:
@@ -443,9 +413,6 @@ func update_body(delta: float) -> void:
 	tree.set("parameters/mix/blend_amount", _action_weight)
 	_left_ik.influence = move_toward(_left_ik.influence, _two_hands, 6.0 * delta)
 	tree.set("parameters/guard_seek/seek_request", GUARD_TIME)
-	tree.set("parameters/stand_seek/seek_request", 0.0)
-	var s := float(tree.get("parameters/stance/blend_amount"))
-	tree.set("parameters/stance/blend_amount", move_toward(s, _guard, 4.0 * delta))
 	if _flash > 0.0:
 		_flash = maxf(_flash - delta * 4.0, 0.0)
 		_steel.emission_enabled = _flash > 0.0
@@ -457,6 +424,14 @@ func flash() -> void:
 	_flash = 1.0
 
 
+## Death: it lets go of the sword's pose; the right hand keeps the sword as it falls.
 func collapse() -> void:
-	release_sword()
+	_dead = true
+	_torso.yaw = 0.0
+	_torso.lean = 0.0
+	_right_ik.active = false
+	_grip_hands.influence = 0.0
+	_two_hands = 0.0
+	sword.top_level = false
+	sword.transform = SWORD_IN_HAND
 	act("Death01", 0.0, clip_length("Death01"), clip_length("Death01"), 0.1)

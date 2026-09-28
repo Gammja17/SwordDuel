@@ -27,6 +27,7 @@ const BIND_RATE := 1.6        # balance change per second per unit of net push
 const BIND_PUSH_DECAY := 1.5  # the player's push fades unless they keep pushing
 const BIND_TELL := 0.4        # shiver before the opponent switches sides
 const BIND_TIMEOUT := 6.0
+const DODGE_CLEAR_MS := 350   # blades pass each other this long after a dodge starts
 
 var player: Node3D
 var opponent: Node3D
@@ -67,7 +68,8 @@ func _physics_process(delta: float) -> void:
 		begin_bind((ps.base + ps.tip + opponent.blade_base + opponent.blade_tip) * 0.25)
 		return
 
-	var touch := _swept_touch(ps.prev_base, ps.prev_tip, ps.base, ps.tip,
+	# Just after a dodge, the blade went with the body: it isn't caught either.
+	var touch := {"found": false} if player.dodged_within(DODGE_CLEAR_MS) else _swept_touch(ps.prev_base, ps.prev_tip, ps.base, ps.tip,
 		opponent.blade_prev_base, opponent.blade_prev_tip, opponent.blade_base, opponent.blade_tip, BLADE_TOUCH)
 	if touch.found:
 		if ps.clash_lock <= 0.0:

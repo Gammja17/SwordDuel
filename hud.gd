@@ -54,7 +54,7 @@ func _ready() -> void:
 	_root.theme = _make_theme()
 	add_child(_root)
 
-	var shade := _vignette(Color(0, 0, 0, 0.65))
+	var shade := _vignette(Color(0, 0, 0, 0.4))
 	_root.add_child(shade)
 	_hurt = _vignette(Color(0.55, 0.0, 0.0, 1.0))
 	_hurt.modulate.a = 0.0
@@ -519,7 +519,7 @@ func _vignette(color: Color) -> TextureRect:
 	tex.gradient = g
 	tex.fill = GradientTexture2D.FILL_RADIAL
 	tex.fill_from = Vector2(0.5, 0.5)
-	tex.fill_to = Vector2(1.0, 0.5)
+	tex.fill_to = Vector2(1.0, 1.0)   # full strength only in the very corners
 	tex.width = 256
 	tex.height = 256
 	var r := TextureRect.new()

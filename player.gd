@@ -3,7 +3,9 @@ extends CharacterBody3D
 ## Locked on to the opponent: the body always faces it, W steps in, S steps back
 ## (slower) and A/D circle. The MOUSE moves the sword: it drags a target across a plane
 ## in front of you and the blade's point follows it with weight (limited acceleration
-## and speed), both hands on the grip. The speed of the tip is what cuts (sword.gd).
+## and speed), both hands on the grip. A fast flick is a committed CUT: the sword swings
+## all the way through that way, the body turning and stepping into it. The speed of
+## the tip is what cuts (sword.gd).
 
 signal hurt(amount: float)
 signal died
@@ -41,6 +43,23 @@ const AIM_REST := Vector2(0.0, 1.45)   # point toward the opponent's face
 const EDGE_TURN := 1.0
 const FREE_PITCH := 0.6
 const FACE_RATE := 20.0   # how quickly the body swings round to the target when locked
+
+# Committed cut: when the mouse target travels FLICK (summed over roughly the last
+# tenth of a second), the point sweeps CUT_REACH across in that direction over
+# CUT_TIME, past the usual range (arms extended, reaching further forward), while the
+# body steps in and the view turns and tips with the swing. The mouse only bends it.
+const FLICK := 0.45
+const FLICK_DECAY := 12.0
+const CUT_TIME := 0.26
+const CUT_REACH := 1.4
+const CUT_MIN := 0.7       # less room than this in that direction: no committed cut
+const CUT_WIDE := Vector2(0.35, 0.35)   # how far past the usual range a cut may carry
+const CUT_LUNGE := 0.18    # the point reaches this much further forward mid-cut
+const CUT_ARMS := 0.08     # and the hands this much further out
+const CUT_STEP := 1.8      # step into the cut (m/s at its start, fading)
+const CUT_BEND := 0.3      # share of mouse movement that bends a cut already going
+const CUT_GAP := 0.1       # a new cut can start this soon after one ends
+const CUT_BREATH := 10.0   # below this much breath, flicks don't commit
 
 # Weight of the sword: the point chases the mouse on a spring whose acceleration and
 # speed are capped. It keeps up with the hand, but a hard swing carries on a little
@@ -101,6 +120,14 @@ var _deflect_timer := 0.0   # after a clash the blade bounces and control is dam
 var _deflect_damp := 1.0    # ... to this share of the mouse
 var _guard_goal := Vector2.ZERO
 var _guard_pull := 0.0
+var _flick := Vector2.ZERO
+var _prev_target := AIM_REST
+var _cut_t := -1.0          # time into a committed cut; < 0 when not cutting
+var _cut_from := Vector2.ZERO
+var _cut_to := Vector2.ZERO
+var _cut_dir := Vector2.ZERO
+var _cut_bend := Vector2.ZERO
+var _cut_gap := 0.0
 var _since_block := 0.0
 var _since_swing := 0.0
 var _swinging := false
@@ -172,6 +199,7 @@ func _input(event: InputEvent) -> void:
 		if event.pressed and not in_bind:
 			_guard_held = true
 			_parry_t = 0.0
+			_cut_t = -1.0   # guarding pulls out of a cut (a feint)
 			breath = maxf(breath - GUARD_COST, 0.0)
 		elif not event.pressed:
 			_guard_held = false
@@ -211,6 +239,7 @@ func deflect(kick: Vector2, duration: float = 0.12, damp: float = 0.6) -> void:
 	_aim_vel = kick * 4.0
 	_deflect_timer = duration
 	_deflect_damp = damp
+	_end_cut()
 	add_trauma(0.18)
 
 
@@ -246,6 +275,7 @@ func _add_posture(amount: float, h: float) -> bool:
 # --- bind (combat.gd drives it) -----------------------------------------------------
 
 func enter_bind() -> void:
+	_end_cut()
 	in_bind = true
 	_bind_push = 0.0
 	_aim_vel = Vector2.ZERO
@@ -254,6 +284,7 @@ func enter_bind() -> void:
 func exit_bind() -> void:
 	in_bind = false
 	_aim_target = _aim
+	_prev_target = _aim_target
 
 
 ## Sideways mouse pressure since the last call (aim units, + = to our right).
@@ -377,6 +408,8 @@ func _physics_process(delta: float) -> void:
 	var local := input_dir.normalized()
 	local.x *= STRAFE_SPEED
 	local.z *= SPEED if local.z < 0.0 else BACK_SPEED
+	if _cut_t >= 0.0 and input_dir.z <= 0.0:
+		local.z -= CUT_STEP * (1.0 - _cut_progress())   # step into the cut
 	var move := global_transform.basis * local
 	if _dodge_t >= 0.0:
 		# A dodge overrides walking: fast at first, easing off.
@@ -407,12 +440,16 @@ func _physics_process(delta: float) -> void:
 	if _guard_held and not in_bind:
 		_track_incoming_blade()
 	if not in_bind:
-		_step_aim(delta)
+		_update_cut(delta)
+		if _cut_t < 0.0:
+			_step_aim(delta)
 
 	# Sword: the point goes where it has been steered; the hands follow on a sphere
-	# around the chest, so reaching high/wide also moves the arms.
-	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z)
-	var grip := GRIP_CENTER + (aim_pt - GRIP_CENTER).normalized() * GRIP_RADIUS
+	# around the chest, so reaching high/wide also moves the arms. Mid-cut the arms
+	# extend and the point reaches further forward.
+	var ext := sin(PI * _cut_progress()) if _cut_t >= 0.0 else 0.0
+	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z - CUT_LUNGE * ext)
+	var grip := GRIP_CENTER + (aim_pt - GRIP_CENTER).normalized() * (GRIP_RADIUS + CUT_ARMS * ext)
 	var dir := (aim_pt - grip).normalized()
 	sword.drive(to_global(grip), global_transform.basis * dir, delta)
 	var blade_basis := sword.transform.basis
@@ -464,7 +501,7 @@ func _step_aim(delta: float) -> void:
 	if _aim_vel.length() > AIM_MAX_SPEED * k:
 		_aim_vel = _aim_vel.normalized() * AIM_MAX_SPEED * k
 	var next := _aim + _aim_vel * delta
-	var clamped := _clamp_aim(next)
+	var clamped := _clamp_wide(next)   # back from past the edge after a cut, not snapped
 	if clamped.x != next.x:
 		_aim_vel.x = 0.0
 	if clamped.y != next.y:
@@ -474,6 +511,61 @@ func _step_aim(delta: float) -> void:
 
 func _clamp_aim(a: Vector2) -> Vector2:
 	return Vector2(clampf(a.x, AIM_MIN.x, AIM_MAX.x), clampf(a.y, AIM_MIN.y, AIM_MAX.y))
+
+
+func _clamp_wide(a: Vector2) -> Vector2:
+	return Vector2(clampf(a.x, AIM_MIN.x - CUT_WIDE.x, AIM_MAX.x + CUT_WIDE.x),
+		clampf(a.y, AIM_MIN.y - CUT_WIDE.y, AIM_MAX.y + CUT_WIDE.y))
+
+
+# --- committed cut ---------------------------------------------------------------
+
+## Watches for a flick, and runs a cut once one starts: the point follows the cut's
+## path (eased: fastest in the middle) instead of the spring.
+func _update_cut(delta: float) -> void:
+	var moved := _aim_target - _prev_target
+	_prev_target = _aim_target
+	_cut_gap -= delta
+	if _cut_t >= 0.0:
+		_cut_bend += moved * CUT_BEND
+		_cut_t += delta
+		var p := _cut_progress()
+		var q := p * p * (3.0 - 2.0 * p)
+		var before := _aim
+		_aim = _clamp_wide(_cut_from.lerp(_cut_to, q) + _cut_bend)
+		_aim_vel = (_aim - before) / maxf(delta, 0.0001)
+		if p >= 1.0:
+			_end_cut()
+			_aim_target = _clamp_aim(_aim)   # the blade eases back in from past the edge
+			_prev_target = _aim_target
+		return
+	_flick = _flick * exp(-FLICK_DECAY * delta) + moved
+	if _flick.length() < FLICK or _cut_gap > 0.0 or _guard_held or breath < CUT_BREATH \
+			or _deflect_timer > 0.0 or not active:
+		return
+	var dir := _flick.normalized()
+	var to := _clamp_wide(_aim + dir * CUT_REACH)
+	if _aim.distance_to(to) < CUT_MIN:
+		return   # already at the edge that way: just steer
+	_cut_from = _aim
+	_cut_to = to
+	_cut_dir = dir
+	_cut_bend = Vector2.ZERO
+	_cut_t = 0.0
+	_flick = Vector2.ZERO
+	add_trauma(0.08)
+
+
+func _end_cut() -> void:
+	if _cut_t >= 0.0:
+		_cut_gap = CUT_GAP
+	_cut_t = -1.0
+	_flick = Vector2.ZERO
+	_prev_target = _aim_target
+
+
+func _cut_progress() -> float:
+	return clampf(_cut_t / CUT_TIME, 0.0, 1.0) if _cut_t >= 0.0 else 0.0
 
 
 ## Turn to face the target (quickly, so switching the lock back on swings round
@@ -495,16 +587,23 @@ func _update_camera(delta: float, moving: float) -> void:
 		look_pitch = atan2(chest.y - eye.y, maxf(flat, 0.3))
 	_pitch = lerp_angle(_pitch, look_pitch, clampf(delta * 6.0, 0.0, 1.0))
 
-	# A little sway toward where the blade is, a walking bob, and impact shake.
+	# A little sway toward where the blade is, a walking bob, and impact shake. A cut
+	# turns the shoulders and so the view with it, tips it the way the blade falls and
+	# widens it for a moment.
 	var sway_yaw := -_aim.x * deg_to_rad(6.0)
-	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(6.0)
+	# (Looking further down after a low blade, so it doesn't drop out of sight.)
+	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(6.0 if _aim.y > AIM_REST.y else 20.0)
+	var swing := sin(PI * _cut_progress()) if _cut_t >= 0.0 else 0.0
+	sway_yaw -= _cut_dir.x * 0.14 * swing
+	sway_pitch += _cut_dir.y * 0.07 * swing
+	_cam.fov = 74.0 + 5.0 * swing
 	_trauma = maxf(_trauma - delta * 1.8, 0.0)
 	var shake := _trauma * _trauma
 	var bob_amount := clampf(moving / SPEED, 0.0, 1.0)
 	_bob += delta * moving * 2.6
 	_cam.position = EYE + Vector3(cos(_bob) * 0.010 * bob_amount, absf(sin(_bob)) * 0.018 * bob_amount, 0.0) \
 		+ Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * 0.03 * shake
-	var roll := 0.0
+	var roll := -_cut_dir.x * 0.07 * swing
 	if _dodge_t >= 0.0:
 		roll = -_dodge_dir.x * 0.12 * sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)
 		_cam.position.y -= 0.08 * sin(clampf(_dodge_t / DODGE_TIME, 0.0, 1.0) * PI)

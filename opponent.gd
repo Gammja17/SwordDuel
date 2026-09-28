@@ -1,10 +1,12 @@
 extends CharacterBody3D
 ## A reactive AI duelist with a longsword, played by the animated knight in
-## knight_body.gd. Its blade is wherever the animation puts its right hand; combat.gd
-## reads that every frame, so blades still really meet.
+## knight_body.gd. Its sword moves between clean poses (sword_poses.gd) on timing
+## curves, and the body follows it; combat.gd reads the blade every frame, so blades
+## still really meet.
 ##
-## Loop: circle at guard distance, then step in with a windup (the attack clip played
-## slowly up to just before the strike), strike (the clip at speed), and step back out.
+## Loop: circle at guard distance, then step in with a windup (the sword drawn back and
+## held there a moment: the tell), strike (a fast arc through to the other side, with a
+## small step), hold the follow-through, and come back to guard.
 ## How it fights is set by a tier (see main.gd): windup/attack speed, which attacks it
 ## knows, how often it feints, chains a second cut, parries or dodges the player's
 ## cuts, presses into a bind, or punishes the player for stepping into range.
@@ -15,10 +17,10 @@ signal attack_whiffed   # a cut ended without landing (dodged, fell short)
 enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD, DODGE }
 
 const BodyScript := preload("res://knight_body.gd")
-const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
 const Fx := preload("res://fx.gd")
 const Trail := preload("res://trail.gd")
+const SwordPoses := preload("res://sword_poses.gd")
 
 const GRAVITY := 18.0
 const POISE_RANGE := 2.0     # hold the guard here: just outside the player's resting reach
@@ -30,16 +32,10 @@ const CIRCLE_SPEED := 1.1
 const PARRY_TIME := 0.32
 const DODGE_TIME := 0.4
 const DODGE_SPEED := 4.2
-const STRIKE_LEAD := 0.09    # the strike segment starts this long before the fastest moment
-const STRIKE_TAIL := 0.09
-
-# Attack clips: [clip, seconds into the clip where the swing is fastest (measured)].
-const ATTACKS := {
-	"a": ["ual2/Sword_Regular_A", 0.25],
-	"b": ["ual2/Sword_Regular_B", 0.27],
-	"c": ["ual2/Sword_Regular_C", 0.65],
-	"lunge": ["ual2/Sword_Dash", 0.33],
-}
+const WINDUP_DRAW := 0.55    # share of the windup spent drawing back; the rest is held
+const CUT_ARC := 0.24        # how far the hands swing out in front mid-cut (m)
+const STRIKE_STEP := 2.2     # a step into each cut (m/s, fading: about 0.4 m)
+const BIND_GRIP := Vector3(0.04, -0.06, -0.34)
 
 var hp := 100.0
 var max_hp := 100.0
@@ -76,6 +72,17 @@ var _dodge_dir_local := Vector3(0, 0, 1)
 var _step_dist := 0.0
 var _has_blade := false
 
+# The sword's pose and the move it is making (see _sword_to).
+var _pose := {}
+var _from := {}
+var _to := {}
+var _move_t := 0.0
+var _move_len := 0.01
+var _move_ease := ""
+var _move_arc := 0.0
+var _via := {}   # a pose the move passes through halfway, or empty
+var _returning := false
+
 # Blade state read by combat.gd, world space: the edge runs from base (front of the
 # crossguard) to tip; prev_* are last frame's positions.
 var blade_base := Vector3.ZERO
@@ -110,6 +117,9 @@ func setup(player: Node3D, tier: Dictionary) -> void:
 	hp = max_hp
 	display_name = String(tier.get("name", ""))
 	_body.build(tier.get("tabard", Color(0.3, 0.3, 0.45)), bool(tier.get("crest", false)))
+	_pose = SwordPoses.make("guard")
+	_sword_to(_pose, 0.01)
+	_update_sword(0.0)
 	refresh_blade(0.0)
 
 
@@ -124,6 +134,7 @@ func set_drill(mode: String) -> void:
 	_drill = mode
 	if mode == "idle" or mode == "open":
 		_state = State.IDLE
+		_sword_to(_rest_pose(), 0.35)
 	elif _state == State.IDLE:
 		_enter(State.APPROACH)
 
@@ -228,7 +239,7 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 ##   - they cut into our guard: some fighters answer at once or bind
 func on_blade_clashed(_pos: Vector3, player_parried: bool, i_parried: bool) -> void:
 	if i_parried:
-		_start_windup(0.5)
+		_start_windup(0.65)
 	elif player_parried:
 		_in_combo = false
 		_enter(State.STAGGER)
@@ -243,7 +254,7 @@ func on_blade_clashed(_pos: Vector3, player_parried: bool, i_parried: bool) -> v
 		var r := randf()
 		var riposte := float(_t.get("riposte", 0.0))
 		if r < riposte:
-			_start_windup(0.6)
+			_start_windup(0.7)
 		elif r < riposte + float(_t.get("bind_press", 0.0)) * 0.5:
 			_wants_bind = true
 
@@ -267,19 +278,16 @@ func enter_bind() -> void:
 	_wants_bind = false
 	_in_combo = false
 	_state = State.BIND
-	_body.act("ual2/Sword_Block", 0.3, 0.3, 1.0, 0.12)   # hold the block pose
 
 
 func set_bind_point(world_point: Vector3) -> void:
 	# Hold the sword from our grip toward the crossing point.
-	var hand: Transform3D = _body.sword_transform()
-	var dir := (world_point - hand.origin).normalized()
-	_body.hold_sword(Transform3D(Armor.blade_basis(dir, Vector3.UP.cross(dir)), hand.origin))
+	var p := SwordPoses.aimed(BIND_GRIP, to_local(world_point) - _body.chest_anchor())
+	_sword_to(p, 0.01)
 
 
 ## The player won the bind: our blade is thrown aside.
 func bind_lost(side: float) -> void:
-	_body.release_sword()
 	_side = side
 	_enter(State.STAGGER)
 	_timer = float(_t.get("stagger", 0.8)) + 0.15
@@ -288,15 +296,13 @@ func bind_lost(side: float) -> void:
 
 ## We won the bind: the player's blade is shoved aside, cut straight from the bind.
 func bind_won() -> void:
-	_body.release_sword()
-	_start_windup(0.3)
+	_start_windup(0.45)
 
 
 ## The bind came apart; if the player pulled out, some fighters cut after them.
 func bind_released(player_pulled_out: bool) -> void:
-	_body.release_sword()
 	if player_pulled_out and randf() < float(_t.get("exit_cut", 0.0)):
-		_start_windup(0.35)
+		_start_windup(0.5)
 	else:
 		_enter(State.POISE)
 		_push = global_transform.basis.z * 0.8
@@ -328,6 +334,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 	move_and_slide()
 	_animate_locomotion()
+	_update_sword(delta)
 
 	var moving := Vector2(velocity.x, velocity.z).length()
 	_step_dist += moving * delta
@@ -404,10 +411,14 @@ func _run_state(delta: float) -> void:
 					if not _attack_hit:
 						attack_whiffed.emit()
 					_enter(State.RECOVER)
-					_body.act_speed(1.0)   # finish the follow-through at natural speed
 		State.RECOVER:
 			if dist < POISE_RANGE:
 				_move(-STEP_OUT_SPEED)
+			# Hold the follow-through a moment, then bring the sword back to guard.
+			var rec := float(_t.get("recover", 0.55))
+			if not _returning and _timer < rec * 0.65:
+				_returning = true
+				_sword_to(_rest_pose(), rec * 0.55)
 			if _timer <= 0.0:
 				_enter(State.POISE)
 		State.STAGGER, State.PARRY:
@@ -461,7 +472,9 @@ func _watch_for_player_cut() -> void:
 	if r < parry:
 		_state = State.PARRY
 		_timer = PARRY_TIME
-		_body.act("ual2/Sword_Block", 0.0, 0.35, PARRY_TIME, 0.04)
+		# Snap the blade up across the side the cut comes from.
+		var side := 1.0 if to_local(_sword.tip).x >= 0.0 else -1.0
+		_sword_to(SwordPoses.parry(side), 0.07, "out")
 	elif r < parry + dodge:
 		_start_dodge()
 
@@ -490,13 +503,14 @@ func _watch_for_overswing() -> void:
 		return
 	_overswing_cd = 0.9
 	if randf() < float(_t.get("punish", 0.0)):
-		_start_windup(0.6)
+		_start_windup(0.7)
 
 
 func _enter(state: int) -> void:
 	_state = state
 	if state == State.POISE or state == State.APPROACH:
 		_body.release(0.25)   # back to stance and footwork
+		_sword_to(_rest_pose(), 0.3)
 	match state:
 		State.POISE:
 			var p: Vector2 = _t.get("poise", Vector2(0.6, 1.2))
@@ -505,14 +519,19 @@ func _enter(state: int) -> void:
 			_timer = float(_t.get("attack", 0.22))
 		State.RECOVER:
 			_timer = float(_t.get("recover", 0.55))
+			_returning = false
 		State.STAGGER:
 			_timer = float(_t.get("stagger", 0.9))
+			_sword_to(SwordPoses.make("thrown"), 0.12, "out")
 			_body.act("ual2/Hit_Knockback", 0.0, _body.clip_length("ual2/Hit_Knockback"), _timer, 0.08)
 
 
-## Windup: the attack clip played slowly up to just before its strike.
+## Windup: the sword drawn back for this cut, then held there until the strike.
 func _start_windup(scale: float) -> void:
 	var lines: Array = _t.get("lines", ["a"])
+	if scale < 0.8 and lines.size() > 1:
+		# A quick answer (riposte, punish) is a cut: a thrust needs a full draw back.
+		lines = lines.filter(func(l): return l != "lunge")
 	_kind = lines[randi() % lines.size()]
 	_side = 1.0 if randf() < 0.5 else -1.0
 	# Better fighters vary their rhythm, so the cut can't be timed by counting.
@@ -522,8 +541,7 @@ func _start_windup(scale: float) -> void:
 	_feinted = false
 	_state = State.WINDUP
 	_timer = _windup_total
-	var a: Array = ATTACKS[_kind]
-	_body.act(a[0], 0.0, maxf(float(a[1]) - STRIKE_LEAD, 0.05), _windup_total, 0.15)
+	_sword_to(SwordPoses.make("wind_" + _kind), _windup_total * WINDUP_DRAW, "out")
 
 
 ## Feint: switch to a different attack partway through the windup, which costs a moment.
@@ -535,18 +553,59 @@ func _feint() -> void:
 		other = lines[randi() % lines.size()]
 	_kind = other
 	_timer += 0.2
-	var a: Array = ATTACKS[_kind]
-	var until := maxf(float(a[1]) - STRIKE_LEAD, 0.05)
-	_body.act(a[0], until * 0.4, until, _timer, 0.12)
+	_sword_to(SwordPoses.make("wind_" + _kind), 0.2)
 
 
-## Strike: the same clip carries on from the windup (no cut in the motion), sped up so
-## its fastest part takes this tier's attack time.
+## Strike: from the held windup through to the far side in this tier's attack time,
+## fastest in the middle, with a small step in.
 func _start_attack() -> void:
 	_attack_hit = false
 	_enter(State.ATTACK)
-	_body.act_speed((STRIKE_LEAD + STRIKE_TAIL) / maxf(_timer, 0.05))
+	_sword_to(SwordPoses.make("end_" + _kind), _timer, "cut", CUT_ARC)
+	if SwordPoses.POSES.has("mid_" + _kind):
+		_via = SwordPoses.make("mid_" + _kind)
+	_push = -global_transform.basis.z * STRIKE_STEP
 	Sfx.play("swing", blade_tip, 0.0)
+
+
+## Start moving the sword from where it is now to `pose` over `seconds`. Ease "out"
+## starts fast and settles (drawing back), "inout" speeds up and slows down, "cut" is
+## inout weighted late, so the blade meets its target near the middle of the strike
+## (the step in has already carried it forward).
+func _sword_to(pose: Dictionary, seconds: float, ease := "inout", arc := 0.0) -> void:
+	_from = _pose if not _pose.is_empty() else pose
+	_to = pose
+	_move_t = 0.0
+	_move_len = maxf(seconds, 0.01)
+	_move_ease = ease
+	_move_arc = arc
+	_via = {}
+
+
+func _update_sword(delta: float) -> void:
+	_move_t += delta
+	var p := clampf(_move_t / _move_len, 0.0, 1.0)
+	var q := p * p * (3.0 - 2.0 * p)
+	if _move_ease == "out":
+		q = 1.0 - pow(1.0 - p, 3.0)
+	elif _move_ease == "cut":
+		q = pow(q, 1.35)
+	if _via.is_empty():
+		_pose = SwordPoses.blend(_from, _to, q, _move_arc)
+	elif q < 0.5:
+		_pose = SwordPoses.blend(_from, _via, q * 2.0)
+	else:
+		_pose = SwordPoses.blend(_via, _to, q * 2.0 - 1.0)
+	var shown := _pose
+	if p >= 1.0 and (_state == State.POISE or _state == State.APPROACH or _state == State.IDLE):
+		# A living guard: the point drifts a little with breathing.
+		shown = _pose.duplicate()
+		shown.grip = (_pose.grip as Vector3) + Vector3(sin(_clock * 1.7) * 0.01, sin(_clock * 2.3) * 0.012, 0.0)
+	_body.pose(shown)
+
+
+func _rest_pose() -> Dictionary:
+	return SwordPoses.make("open" if _drill == "open" else "guard")
 
 
 ## Legs follow the body's velocity every frame; the upper body keeps its guard up
@@ -555,9 +614,6 @@ func _start_attack() -> void:
 func _animate_locomotion() -> void:
 	var local := global_transform.basis.inverse() * Vector3(velocity.x, 0.0, velocity.z)
 	_body.move(Vector2(local.x, -local.z))
-	_body.set_guard(0.0 if _drill == "open" else 1.0)
-	if _state == State.RECOVER and _timer < float(_t.get("recover", 0.55)) * 0.6:
-		_body.release(0.3)
 
 
 func _move(speed: float) -> void:
