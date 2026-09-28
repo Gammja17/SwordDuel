@@ -30,6 +30,7 @@ const CUT_ARC := 0.22         # tip travel (m) since the swing began that a cut 
 const PARRY_ARC := 0.12       # ... and a parry
 const SWING_START := 1.5      # swing speed at which a swing begins (below it, it ends)
 const CUT_POWER := 0.72       # tip speed -> cut strength (keeps damage where it was before the blade got quicker)
+const CUT_MAX := 9.5         # ... up to this: a full swinging cut is no deadlier than a fast steered one
 const HIT_COOLDOWN := 0.35    # delay before the same swing can cut again
 const CLASH_LOCK := 0.25      # after a clash the blade is bouncing; no cut/clash
 const SWING_SOUND_SPEED := 6.0
@@ -245,6 +246,6 @@ func try_cut(body: Node, point: Vector3) -> void:
 	if _cut_cd > 0.0:
 		return
 	_cut_cd = HIT_COOLDOWN
-	var strength := tip_speed * CUT_POWER
+	var strength := minf(tip_speed * CUT_POWER, CUT_MAX)
 	body.receive_cut(strength, point, _swing_dir)
 	cut_registered.emit(strength, point)

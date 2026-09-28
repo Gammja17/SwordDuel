@@ -73,7 +73,7 @@ const PRACTICE_TIER := {
 	"tabard": Color(0.20, 0.30, 0.55), "crest": false,
 }
 const PRACTICE_STEPS := [
-	{"id": "swing", "drill": "idle", "task": "마우스를 크게 휘둘러 보세요"},
+	{"id": "swing", "drill": "idle", "task": "마우스를 세게 휘두르거나 좌클릭해 보세요"},
 	{"id": "cut", "drill": "open", "task": "W로 다가가서 베어 보세요"},
 	{"id": "parry", "drill": "attack", "task": "내려오는 칼을 향해 휘두르거나\n닿기 직전에 우클릭해서 쳐내세요"},
 	{"id": "dodge", "drill": "attack", "task": "칼이 내려오면 스페이스로 피하세요"},
@@ -213,7 +213,7 @@ func _to_title() -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	_hud.show_card("1대1 검술 결투", "진검승부",
-		"마우스로 칼을 휘둘러 싸웁니다.\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 회피, 우클릭 막기와 쳐내기\n휠 클릭 락온 켜고 끄기\n세 사람을 차례로 이기면 끝납니다.",
+		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 회피, 우클릭 막기와 쳐내기\n휠 클릭 락온 켜고 끄기\n세 사람을 차례로 이기면 끝납니다.",
 		"클릭하면 시작합니다\nP를 누르면 연습을 다시 합니다" if _practice_done else "클릭하면 연습부터 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
