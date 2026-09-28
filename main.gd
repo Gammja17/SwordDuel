@@ -40,7 +40,7 @@ const TIERS := [
 		"kicker": "두 번째 상대",
 		"name": "기사 서혁",
 		"about": "좌우로 번갈아 베고, 가끔 치켜든 쪽을 바꿔 속입니다. 함부로 휘두르면 받아칩니다.",
-		"hp": 90.0, "windup": 0.46, "attack": 0.23, "recover": 0.6, "stagger": 0.7,
+		"hp": 85.0, "windup": 0.46, "attack": 0.23, "recover": 0.6, "stagger": 0.7,
 		"poise": Vector2(0.6, 1.3), "attack_prob": 0.7, "lines": ["a", "b", "c"], "dodge": 0.15, "parry_window": 0.18, "windup_jitter": 0.15,
 		"feint": 0.25, "combo": 0.15, "punish": 0.4, "riposte": 0.3, "damage": 0.65,
 		"armor": 2.0, "flinch_speed": 9.0,
@@ -52,7 +52,7 @@ const TIERS := [
 		"kicker": "마지막 상대",
 		"name": "검술사범 무진",
 		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 달려들며 베기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
-		"hp": 100.0, "windup": 0.40, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
+		"hp": 115.0, "windup": 0.40, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
 		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "lunge"], "dodge": 0.25, "parry_window": 0.14, "windup_jitter": 0.2,
 		"feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5, "damage": 0.72,
 		"armor": 3.0, "flinch_speed": 11.0,
@@ -92,6 +92,8 @@ var _hud
 var _title_cam: Camera3D
 var _title_angle := 0.8
 var _hitstop_until := 0
+var _slow_until := 0
+var _slow_scale := 1.0
 var _click_ready_at := 0
 var _stats := {}
 var _totals := {}
@@ -128,7 +130,13 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if Engine.time_scale < 1.0 and Time.get_ticks_msec() >= _hitstop_until:
+	# Hitstop (near-freeze) first, then any slow motion, then normal speed.
+	var now := Time.get_ticks_msec()
+	if now < _hitstop_until:
+		Engine.time_scale = 0.05
+	elif now < _slow_until:
+		Engine.time_scale = _slow_scale
+	elif Engine.time_scale < 1.0:
 		Engine.time_scale = 1.0
 
 	for i in _torches.size():
@@ -143,6 +151,13 @@ func _process(delta: float) -> void:
 			if is_instance_valid(_player) and is_instance_valid(_opponent):
 				_hud.set_enemy_hp(_opponent.hp / _opponent.max_hp)
 				_hud.set_player(_player.hp / 100.0, _player.posture / 100.0, _player.hurt_flash, _player.breath / 100.0)
+				match _player.special_available():
+					"execute":
+						_hud.set_prompt("E  처형")
+					"thrust":
+						_hud.set_prompt("E  치명타")
+					_:
+						_hud.set_prompt("")
 				if is_instance_valid(_combat) and _combat.is_bound():
 					var b: Dictionary = _combat.bind
 					_hud.show_bind(b.a, -float(b.ai_dir), b.tell > 0.0)
@@ -213,7 +228,7 @@ func _to_title() -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	_hud.show_card("1대1 검술 결투", "진검승부",
-		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 회피, 우클릭 막기와 쳐내기\n휠 클릭 락온 켜고 끄기\n세 사람을 차례로 이기면 끝납니다.",
+		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 구르기, 우클릭 막기와 쳐내기\n쳐낸 뒤 E를 누르면 치명타, 거의 쓰러진 상대는 처형\n휠 클릭 락온 켜고 끄기\n세 사람을 차례로 이기면 끝납니다.",
 		"클릭하면 시작합니다\nP를 누르면 연습을 다시 합니다" if _practice_done else "클릭하면 연습부터 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
@@ -329,6 +344,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.sword.cut_registered.connect(_on_cut)
 	_player.sword.clash_registered.connect(_on_clash)
 	_player.sword.weak_touch.connect(_on_weak_touch)
+	_player.special_struck.connect(_on_special_struck)
 	_player.hurt.connect(_on_player_hurt)
 	_player.lock_changed.connect(_on_lock_changed)
 	_player.died.connect(_on_player_died)
@@ -337,6 +353,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 
 
 func _clear_duel() -> void:
+	_hud.set_prompt("")
 	Engine.time_scale = 1.0
 	for n in [_player, _opponent, _combat]:
 		if is_instance_valid(n):
@@ -436,6 +453,10 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 			_stats["parries"] += 1
 			_hud.popup("쳐내기!", GOLD)
 			_hitstop(0.09)
+			_slowmo(0.35, 0.3)
+			if is_instance_valid(_opponent) and _phase == Phase.FIGHT:
+				_opponent.open_critical(2.2)
+				_hint_once("crit", "상대가 무너졌어요. 다가가서 E를 누르면 치명타")
 			if _step_id() == "parry":
 				_practice_success()
 		"PARRIED":
@@ -460,18 +481,34 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 
 func _on_cut(strength: float, _pos: Vector3) -> void:
 	_stats["cuts"] += 1
-	_player.add_trauma(0.14)   # the blow jolts back through the hands
 	var armor := float(_opponent.tier_value("armor", 1.5)) if is_instance_valid(_opponent) else 0.0
+	# The harder the blow, the longer the world holds still and the harder it kicks back.
+	var k := clampf((strength - armor) / 6.0, 0.0, 1.0)
+	_player.impact(k)
 	if strength - armor < 3.5:
 		_hud.popup("얕다", Color(0.75, 0.75, 0.72))   # the plate took it
-		_hitstop(0.03)
-	elif strength - armor > 9.0:
+		_hitstop(0.04)
+	elif strength - armor > 6.0:
 		_hud.popup("깊게 베었다!", Color(0.95, 0.45, 0.35))
-		_hitstop(0.09)
+		_hitstop(0.12)
 	else:
-		_hitstop(0.07)
+		_hitstop(0.05 + 0.06 * k)
+	if is_instance_valid(_opponent) and _opponent.is_dead():
+		_slowmo(0.25, 0.8)   # the last blow, in slow motion
+		_player.add_trauma(0.3)
 	if _step_id() == "cut":
 		_practice_success()
+
+
+func _on_special_struck(kind: String) -> void:
+	_stats["cuts"] += 1
+	_hitstop(0.1)
+	if kind == "execute":
+		_hud.popup("처형", Color(0.95, 0.35, 0.28))
+		_slowmo(0.2, 1.0)
+	else:
+		_hud.popup("치명타!", GOLD)
+		_slowmo(0.25, 0.5)
 
 
 func _on_weak_touch(_pos: Vector3) -> void:
@@ -504,6 +541,8 @@ func _on_bind_ended(result: String) -> void:
 			_stats["binds_won"] += 1
 			_hud.popup("걷어냈다!", GOLD)
 			_hitstop(0.08)
+			if is_instance_valid(_opponent) and _phase == Phase.FIGHT:
+				_opponent.open_critical(2.2)
 			if _step_id() == "bind":
 				_practice_success()
 		"lost":
@@ -530,6 +569,14 @@ func _hitstop(seconds: float) -> void:
 		return
 	Engine.time_scale = 0.05
 	_hitstop_until = Time.get_ticks_msec() + int(seconds * 1000.0)
+
+
+## Slow motion (real seconds), after any hitstop that is running.
+func _slowmo(scale: float, seconds: float) -> void:
+	if not hitstop_enabled:
+		return
+	_slow_scale = scale
+	_slow_until = maxi(_hitstop_until, Time.get_ticks_msec()) + int(seconds * 1000.0)
 
 
 func _new_stats() -> Dictionary:

@@ -53,6 +53,9 @@ func _physics_process(delta: float) -> void:
 	var ps = player.sword
 	_rearm -= delta
 	opponent.refresh_blade(delta)   # the animated sword, after this frame's animation
+	if player.has_method("in_special") and player.in_special():
+		ps.release_bind()
+		return   # a critical thrust or an execution plays out on its own
 	if not player.alive or opponent.is_dead():
 		if is_bound():
 			_end_bind("apart")

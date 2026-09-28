@@ -11,6 +11,7 @@ extends CharacterBody3D
 signal hurt(amount: float)
 signal died
 signal lock_changed(locked: bool)
+signal special_struck(kind: String)   # a critical thrust or an execution went in
 
 const SwordScript := preload("res://sword.gd")
 const ArmScript := preload("res://arm.gd")
@@ -59,7 +60,7 @@ const FLICK := 0.3
 const FLICK_DECAY := 12.0
 const CUT_DRAW := 0.13
 const CUT_HANG := 0.04     # a beat at the top of the draw before it lets go
-const CUT_SWING := 0.12
+const CUT_SWING := 0.15
 const CUT_HOLD := 0.1
 const CUT_RETURN := 0.22
 const CUT_FROM := -125.0
@@ -68,43 +69,55 @@ const CUT_OVER := 14.0     # the follow-through carries this much further and sp
 const CUT_PIVOT := Vector3(0.05, 1.32, -0.1)   # between the shoulders, a little forward
 const CUT_TWIST := 0.42    # how far the shoulders and view turn each way (rad)
 const CUT_STEP := 3.0      # step into the cut (m/s at its start, fading)
-const CUT_GAP := 0.2       # a new cut can start this soon after one returns
-const CUT_BREATH := 30.0   # below this much breath, there is no strength for a cut
-const CUT_COST := 10.0     # breath a big swing costs on top of any full swing's
+const CUT_GAP := 0.45      # a new cut can start this soon after one returns
+const CUT_BREATH := 12.0   # below this much breath, there is no strength for a cut
+const CUT_COST := 12.0     # breath a big swing costs (all of it: its parts aren't charged as swings)
+
+# Special moves (E), played out as a short scene. A critical THRUST when the opponent
+# is wide open (just parried, or its blade thrown aside in a bind); an EXECUTION when
+# it is also nearly beaten: the left hand seizes it and the sword goes in. Phase times:
+# step in and draw back, drive in, hold, pull out, back to guard.
+const THRUST_TIMES := [0.2, 0.09, 0.42, 0.18, 0.22]
+const EXECUTE_TIMES := [0.26, 0.12, 0.75, 0.24, 0.24]
+const THRUST_DAMAGE := 30.0
+const SPECIAL_REACH := 3.2                   # it must be at least this close to start one
+const SPECIAL_CLOSE := {"thrust": 1.15, "execute": 0.8}   # where the step in stops
 
 # Weight of the sword: the point chases the mouse on a spring whose acceleration and
 # speed are capped. It keeps up with the hand, but a hard swing carries on a little
 # past where the mouse stopped and can't reverse at once.
-const AIM_STIFFNESS := 900.0
-const AIM_DAMPING := 45.0
-const AIM_MAX_ACCEL := 260.0
-const AIM_MAX_SPEED := 20.0
-const WHIP := 0.07   # a fast drag flings the point ahead of the hands, this far per m/s
+const AIM_STIFFNESS := 600.0
+const AIM_DAMPING := 38.0
+const AIM_MAX_ACCEL := 170.0
+const AIM_MAX_SPEED := 14.0
+const WHIP := 0.035  # a fast drag flings the point ahead of the hands, this far per m/s
 
 # Breath: every full swing costs some. Out of breath, the sword feels heavy (slower to
 # accelerate, lower top speed, so weaker cuts) until you stop swinging for a moment.
 const BREATH_MAX := 100.0
-const SWING_COST := 22.0
-const BREATH_REGEN := 35.0          # per second
-const BREATH_REGEN_DELAY := 0.5     # after the last swing
-const TIRED_BELOW := 35.0
+const SWING_COST := 6.0
+const BREATH_REGEN := 50.0          # per second
+const BREATH_REGEN_DELAY := 0.4     # after the last swing
+const TIRED_BELOW := 25.0
 
 # Dodge (Space): a roll in the held direction (back if none), about 2.8 m, untouchable
 # through its middle. The view drops toward the ground and tips the way it rolls.
 const DODGE_SPEED := 9.0
 const DODGE_TIME := 0.5
 const DODGE_IFRAMES := Vector2(0.03, 0.33)   # untouchable between these times into the dodge
-const DODGE_COST := 25.0
+const DODGE_COST := 18.0
 const DODGE_COOLDOWN := 0.75
 const DODGE_DIP := 0.55      # how far the eyes (and the sword with them) drop mid-roll
 
 # Right mouse: the blade leans toward the incoming blade (the mouse still steers it).
 # Its first moments are a timed PARRY window; holding it after that is just a BLOCK
-# (fills the guard meter).
+# (fills the guard meter). A press that parries nothing leaves no window for the next
+# PARRY_LOCK seconds, so hammering the button only ever blocks.
 const PARRY_WINDOW := 0.2
-const GUARD_COST := 6.0
+const PARRY_LOCK := 0.6
+const GUARD_COST := 5.0
 const GUARD_SNAP := 1.6	  # how much faster the blade moves while guarding
-const GUARD_PULL := 0.45  # how far it leans from the mouse toward their blade
+const GUARD_PULL := 0.3   # how far it leans from the mouse toward their blade
 
 # Guard (posture): every plain BLOCK fills it; parries don't. When it fills, the guard
 # breaks — blade knocked low, control sluggish — so blocking alone can't hold forever.
@@ -146,6 +159,12 @@ var _cut_twist := 0.0       # -1 drawn back .. +1 followed through (turns the vi
 var _cut_kick := 0.0        # 1 at the height of the swing
 var _cut_whoosh := false
 var _cut_gap := 0.0
+var _cut_drag := 0.0        # a cut biting into its target slows for a moment
+var _punch := Vector2.ZERO  # the view jolted along a blow that landed
+var _special := ""          # "thrust" / "execute" while one plays, else ""
+var _sp_t := 0.0
+var _sp_start := []         # [grip, dir] when it began
+var _sp_struck := false
 var _since_block := 0.0
 var _since_swing := 0.0
 var _swinging := false
@@ -154,6 +173,8 @@ var _dodge_dir := Vector3.ZERO
 var _dodge_cd := 0.0
 var _last_dodge_ms := -100000
 var _guard_held := false
+var _parry_lock := 0.0      # a fresh press opens a parry window only once this runs out
+var _since_guard := 99.0    # since the guard was last let go
 var _parry_t := -1.0		   # time since the right button went down; < 0 when released
 var _cam: Camera3D
 var _arm_r
@@ -218,18 +239,15 @@ func _input(event: InputEvent) -> void:
 		toggle_lock()
 		get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
-		if event.pressed and not in_bind:
-			_guard_held = true
-			_parry_t = 0.0
-			_abort_cut()   # guarding pulls out of a cut (a feint)
-			breath = maxf(breath - GUARD_COST, 0.0)
-		elif not event.pressed:
-			_guard_held = false
-			_parry_t = -1.0
+		press_guard(event.pressed)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and not event.is_echo() \
 			and (event as InputEventKey).physical_keycode == KEY_SPACE:
 		_try_dodge()
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.is_echo() \
+			and (event as InputEventKey).physical_keycode == KEY_E:
+		try_special()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -329,11 +347,36 @@ func wants_disengage() -> bool:
 
 
 func is_invulnerable() -> bool:
-	return _dodge_t >= DODGE_IFRAMES.x and _dodge_t <= DODGE_IFRAMES.y
+	return _special != "" or (_dodge_t >= DODGE_IFRAMES.x and _dodge_t <= DODGE_IFRAMES.y)
 
 
 func is_guarding() -> bool:
 	return _guard_held and not in_bind
+
+
+## Right mouse down or up.
+func press_guard(down: bool) -> void:
+	if down and not in_bind:
+		_guard_held = true
+		_parry_t = 0.0 if _parry_lock <= 0.0 else 99.0   # 99: no window, just the guard
+		_parry_lock = PARRY_LOCK
+		_abort_cut()   # guarding pulls out of a cut (a feint)
+		breath = maxf(breath - GUARD_COST, 0.0)
+	elif not down:
+		if _guard_held:
+			_since_guard = 0.0
+		_guard_held = false
+		_parry_t = -1.0
+
+
+## The blade is on guard, or still coming back from it: not a swing.
+func blade_on_guard() -> bool:
+	return is_guarding() or _since_guard < 0.25
+
+
+## A parry landed: the next press may parry again at once.
+func parry_landed() -> void:
+	_parry_lock = 0.0
 
 
 ## The parry window is tighter against better fighters (their tier's parry_window).
@@ -349,7 +392,7 @@ func dodged_within(ms: int) -> bool:
 
 
 func _try_dodge() -> void:
-	if in_bind or _dodge_t >= 0.0 or _dodge_cd > 0.0 or breath < 10.0:
+	if in_bind or _dodge_t >= 0.0 or _dodge_cd > 0.0 or breath < 5.0:
 		return
 	var dir := Vector3.ZERO
 	if Input.is_action_pressed("move_forward"):
@@ -410,6 +453,8 @@ func _physics_process(delta: float) -> void:
 		hurt_flash = maxf(hurt_flash - delta * 1.6, 0.0)
 	_since_block += delta
 	_dodge_cd -= delta
+	_parry_lock -= delta
+	_since_guard += delta
 	if _parry_t >= 0.0:
 		_parry_t += delta
 	if _since_block > POSTURE_RECOVER_DELAY and posture > 0.0:
@@ -435,6 +480,8 @@ func _physics_process(delta: float) -> void:
 	if _cut_t >= 0.0 and _cut_t < _swing_end() and input_dir.z <= 0.0:
 		local.z -= CUT_STEP * (1.0 - _cut_t / _swing_end())   # step into the cut
 	var move := global_transform.basis * local
+	if _special != "":
+		move = _special_step()
 	if _dodge_t >= 0.0:
 		# A dodge overrides walking: fast at first, easing off.
 		_dodge_t += delta
@@ -465,7 +512,7 @@ func _physics_process(delta: float) -> void:
 	_guard_pull = 0.0
 	if _guard_held and not in_bind:
 		_track_incoming_blade()
-	if not in_bind:
+	if not in_bind and _special == "":
 		_watch_flick(delta)
 		if _cut_t < 0.0 or _cut_t >= _hold_end():
 			_step_aim(delta)
@@ -473,7 +520,11 @@ func _physics_process(delta: float) -> void:
 	# Sword: the hands go where the mouse steers them and the blade points on to the
 	# aim (see _held_pose). A cut takes over.
 	var held := _held_pose()
-	var pose := held if _cut_t < 0.0 else _cut_pose(delta, held)
+	var pose := held
+	if _special != "":
+		pose = _special_pose(delta, held)
+	elif _cut_t >= 0.0:
+		pose = _cut_pose(delta, held)
 	var grip: Vector3 = pose[0]
 	var dir: Vector3 = pose[1]
 	var dip := roll_offset()   # the whole upper body goes down with a roll
@@ -481,7 +532,10 @@ func _physics_process(delta: float) -> void:
 	sword.drive(to_global(grip), global_transform.basis * dir, delta)
 	var blade_basis := sword.transform.basis
 	_arm_r.pose(SHOULDER_R - dip, grip, Vector3(0.7, -0.7, 0.1), blade_basis)
-	_arm_l.pose(SHOULDER_L - dip, grip - dir * SwordMesh.LEFT_HAND, Vector3(-0.7, -0.7, 0.1), blade_basis)
+	var left_hand := grip - dir * SwordMesh.LEFT_HAND
+	if _special == "execute" and _sp_t < _sp_end(3) and target != null:
+		left_hand = to_local(_grab_point())   # the left hand has hold of them
+	_arm_l.pose(SHOULDER_L - dip, left_hand, Vector3(-0.7, -0.7, 0.1), blade_basis)
 
 	_update_camera(delta, moving)
 
@@ -489,7 +543,8 @@ func _physics_process(delta: float) -> void:
 ## Each full swing (a real cut's speed and travel) costs breath once.
 func _update_breath(delta: float) -> void:
 	var swinging: bool = sword.is_real_swing(SwordScript.CUT_THRESHOLD, SwordScript.CUT_ARC)
-	if swinging and not _swinging:
+	# (A big cut paid for itself when it began: its draw, swing and return are free.)
+	if swinging and not _swinging and _cut_t < 0.0 and _cut_gap <= 0.0 and _special == "":
 		breath = maxf(breath - SWING_COST, 0.0)
 	if swinging or sword.swing_speed > 2.0:
 		_since_swing = 0.0
@@ -632,7 +687,8 @@ func _blend(a: Array, b: Array, t: float) -> Array:
 
 ## Where the cut has the blade now, and how far the view turns with it.
 func _cut_pose(delta: float, held: Array) -> Array:
-	_cut_t += delta
+	_cut_drag -= delta
+	_cut_t += delta * (0.25 if _cut_drag > 0.0 else 1.0)
 	var t := _cut_t
 	var twist_from := sin(deg_to_rad(CUT_FROM))
 	var out: Array
@@ -687,6 +743,142 @@ func _cut_pose(delta: float, held: Array) -> Array:
 	return out
 
 
+## Main calls this when our cut lands (k: 0 a glancing blow .. 1 a full one): the view
+## jolts along the swing, the hands feel it, and a big swing bites and slows a moment.
+func impact(k: float) -> void:
+	var v: Vector3 = global_transform.basis.inverse() * sword.tip_vel
+	_punch = Vector2(v.x, v.y).normalized() * (0.03 + 0.05 * k)
+	add_trauma(0.15 + 0.2 * k)
+	if is_big_swing():
+		_cut_drag = 0.05 + 0.04 * k
+
+
+# --- special moves -----------------------------------------------------------------
+
+## What E would do right now: "execute", "thrust" or "".
+func special_available() -> String:
+	if not active or not alive or in_bind or _special != "" or _dodge_t >= 0.0 or target == null \
+			or not target.has_method("can_be_executed"):
+		return ""
+	var d := Vector2(target.global_position.x - global_position.x, target.global_position.z - global_position.z).length()
+	if d > SPECIAL_REACH:
+		return ""
+	if target.can_be_executed():
+		return "execute"
+	if target.critical_open():
+		return "thrust"
+	return ""
+
+
+func try_special() -> void:
+	var kind := special_available()
+	if kind == "":
+		return
+	_special = kind
+	_sp_t = 0.0
+	_sp_struck = false
+	_sp_start = _cut_now if _cut_t >= 0.0 and not _cut_now.is_empty() else _held_pose()
+	_cut_t = -1.0
+	_cut_twist = 0.0
+	_cut_kick = 0.0
+	_guard_held = false
+	_parry_t = -1.0
+	target.seize()
+	Sfx.play_flat("armor", -2.0)
+
+
+func in_special() -> bool:
+	return _special != ""
+
+
+## When phase i of the current special move ends (seconds into it).
+func _sp_end(i: int) -> float:
+	var times: Array = THRUST_TIMES if _special == "thrust" else EXECUTE_TIMES
+	var t := 0.0
+	for k in i + 1:
+		t += float(times[k])
+	return t
+
+
+## Stepping in to close range during the first phase.
+func _special_step() -> Vector3:
+	if target == null or _sp_t >= _sp_end(0):
+		return Vector3.ZERO
+	var to := target.global_position - global_position
+	to.y = 0.0
+	var gap := to.length() - float(SPECIAL_CLOSE[_special])
+	if gap <= 0.0:
+		return Vector3.ZERO
+	var left := maxf(_sp_end(0) - _sp_t, 0.05)
+	return to.normalized() * minf(gap / left, 11.0)
+
+
+## Where the left hand grabs them: the top of the chest, on the near side.
+func _grab_point() -> Vector3:
+	var to_me := (global_position - target.global_position)
+	to_me.y = 0.0
+	return target.global_position + Vector3(0.0, 1.32, 0.0) + to_me.normalized() * 0.2
+
+
+## The sword through the special move: [grip, dir] in body space.
+func _special_pose(delta: float, held: Array) -> Array:
+	_sp_t += delta
+	var chest := to_local(target.global_position + Vector3(0.0, 1.2, 0.0)) if target != null else Vector3(0, 1.2, -1.0)
+	var execute := _special == "execute"
+	# Drawn back: for a thrust the hilt at the right hip, point on them; for an
+	# execution high by the right shoulder (one hand; the other has hold of them).
+	var wind := [Vector3(0.22, 1.18, 0.1), Vector3(-0.08, 0.05, -1.0).normalized()]
+	if execute:
+		wind = [Vector3(0.26, 1.42, 0.12), Vector3(-0.1, -0.2, -1.0).normalized()]
+	var in_grip := Vector3(0.03, 1.28 if not execute else 1.2, -0.52 if not execute else -0.4)
+	var stab := [in_grip, (chest - in_grip).normalized()]
+	var out: Array
+	_cut_kick = 0.0
+	if _sp_t < _sp_end(0):
+		var p := 1.0 - pow(1.0 - _sp_t / _sp_end(0), 3.0)
+		out = _blend(_sp_start, wind, p)
+	elif _sp_t < _sp_end(1):
+		var p := (_sp_t - _sp_end(0)) / (_sp_end(1) - _sp_end(0))
+		out = _blend(wind, stab, p * p)
+		_cut_kick = p
+	elif _sp_t < _sp_end(2):
+		if not _sp_struck:
+			_sp_struck = true
+			_strike_home(stab)
+		# Held in, leaning on it (an execution follows them down a little).
+		var p := (_sp_t - _sp_end(1)) / (_sp_end(2) - _sp_end(1))
+		var push := Vector3(0.0, -0.12 * p if execute else 0.0, -0.04 * sin(PI * minf(p * 2.0, 1.0)))
+		out = [stab[0] + push, ((stab[1] as Vector3) + Vector3(0.0, -0.2 * p if execute else 0.0, 0.0)).normalized()]
+		_cut_kick = 1.0 - p * 0.5
+	elif _sp_t < _sp_end(3):
+		var p := (_sp_t - _sp_end(2)) / (_sp_end(3) - _sp_end(2))
+		if p < 0.2 and not execute and target != null:
+			target.release_seized(2.2)   # shoved off the blade
+		out = _blend(stab, [Vector3(0.16, 1.24, -0.3), stab[1]], p)
+	else:
+		var p := clampf((_sp_t - _sp_end(3)) / (_sp_end(4) - _sp_end(3)), 0.0, 1.0)
+		var q := p * p * (3.0 - 2.0 * p)
+		out = _blend([Vector3(0.16, 1.24, -0.3), stab[1]], held, q)
+		if p >= 1.0:
+			_special = ""
+			_prev_target = _aim_target
+			_flick = Vector2.ZERO
+	return out
+
+
+## The blade goes in.
+func _strike_home(stab: Array) -> void:
+	if target == null:
+		return
+	var point: Vector3 = to_global(stab[0] + (stab[1] as Vector3) * 0.7)
+	var dir: Vector3 = global_transform.basis * (stab[1] as Vector3)
+	var damage := float(target.hp) if _special == "execute" else THRUST_DAMAGE
+	target.stabbed(damage, point, dir)
+	add_trauma(0.45)
+	_punch = Vector2(0.0, -0.06)
+	special_struck.emit(_special)
+
+
 ## A committed cut is swinging (drawn back and let go, up to its follow-through).
 func is_big_swing() -> bool:
 	return _cut_t >= CUT_DRAW and _cut_t < _hold_end()
@@ -732,12 +924,22 @@ func _update_camera(delta: float, moving: float) -> void:
 	# A little sway toward where the blade is, a walking bob, and impact shake. A cut
 	# turns the shoulders and so the view with it, tips it the way the blade falls and
 	# widens it for a moment.
-	var sway_yaw := -_aim.x * deg_to_rad(12.0)
+	var sway_yaw := -_aim.x * deg_to_rad(8.0)
 	# (Looking further down after a low blade, so it doesn't drop out of sight.)
 	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(10.0 if _aim.y > AIM_REST.y else 20.0)
 	sway_yaw += -_cut_side.x * CUT_TWIST * _cut_twist
 	sway_pitch += _cut_side.y * 0.2 * _cut_twist
 	_cam.fov = 74.0 + 12.0 * _cut_kick
+	# A blow that landed jolts the view along it.
+	sway_yaw -= _punch.x
+	sway_pitch += _punch.y
+	_punch = _punch.move_toward(Vector2.ZERO, delta * 0.6)
+	if _special != "":
+		# A special move closes in: the view narrows onto them, and follows an
+		# execution down as they sink.
+		_cam.fov = 74.0 - 14.0 * _cut_kick
+		if _special == "execute" and _sp_t > _sp_end(1):
+			sway_pitch -= 0.25 * clampf((_sp_t - _sp_end(1)) / 0.6, 0.0, 1.0)
 	_trauma = maxf(_trauma - delta * 1.8, 0.0)
 	var shake := _trauma * _trauma
 	var bob_amount := clampf(moving / SPEED, 0.0, 1.0)
@@ -747,9 +949,9 @@ func _update_camera(delta: float, moving: float) -> void:
 		+ Vector3(0.0, -0.07, -0.22) * _cut_kick   # leaning into the swing
 	var roll := _cut_side.x * 0.15 * _cut_twist
 	# The view leans into a fast drag of the blade.
-	sway_yaw += clampf(-_aim_vel.x * 0.012, -0.14, 0.14)
-	sway_pitch += clampf(_aim_vel.y * 0.008, -0.1, 0.1)
-	roll += clampf(_aim_vel.x * 0.008, -0.1, 0.1)
+	sway_yaw += clampf(-_aim_vel.x * 0.006, -0.07, 0.07)
+	sway_pitch += clampf(_aim_vel.y * 0.004, -0.05, 0.05)
+	roll += clampf(_aim_vel.x * 0.004, -0.05, 0.05)
 	if _dodge_t >= 0.0:
 		# Rolling: down toward the ground, tucked (looking down) and tipped the way it
 		# goes, up again at the end.

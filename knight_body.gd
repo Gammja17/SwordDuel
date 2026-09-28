@@ -425,7 +425,8 @@ func flash() -> void:
 
 
 ## Death: it lets go of the sword's pose; the right hand keeps the sword as it falls.
-func collapse() -> void:
+## Run through (on_knees), it sinks to one knee first and then crumples forward.
+func collapse(on_knees := false) -> void:
 	_dead = true
 	_torso.yaw = 0.0
 	_torso.lean = 0.0
@@ -434,4 +435,16 @@ func collapse() -> void:
 	_two_hands = 0.0
 	sword.top_level = false
 	sword.transform = SWORD_IN_HAND
-	act("Death01", 0.0, clip_length("Death01"), clip_length("Death01"), 0.1)
+	if on_knees:
+		var k := clip_length("Fixing_Kneeling") * 0.25
+		act("Fixing_Kneeling", k, k, 1.0, 0.15)
+		var tw := create_tween()
+		tw.tween_interval(0.75)
+		tw.tween_callback(_fall_forward)
+	else:
+		act("Death01", 0.0, clip_length("Death01"), clip_length("Death01"), 0.1)
+
+
+func _fall_forward() -> void:
+	var d := clip_length("kay/Death_B")
+	act("kay/Death_B", d * 0.55, d, d * 0.45, 0.2)

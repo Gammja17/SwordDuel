@@ -48,7 +48,7 @@ static func sparks(parent: Node, pos: Vector3, strength := 1.0) -> void:
 	parent.get_tree().create_timer(1.0).timeout.connect(p.queue_free)
 
 
-static func cut_spray(parent: Node, pos: Vector3, dir: Vector3) -> void:
+static func cut_spray(parent: Node, pos: Vector3, dir: Vector3, amount := 1.0) -> void:
 	if _drop_mat == null:
 		_drop_mat = StandardMaterial3D.new()
 		_drop_mat.albedo_color = Color(0.35, 0.02, 0.02)
@@ -56,13 +56,13 @@ static func cut_spray(parent: Node, pos: Vector3, dir: Vector3) -> void:
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.emitting = false
-	p.amount = 14
+	p.amount = int(14 * amount)
 	p.lifetime = 0.55
 	p.explosiveness = 0.9
 	p.direction = dir if dir.length() > 0.01 else Vector3.UP
 	p.spread = 35.0
 	p.initial_velocity_min = 0.8
-	p.initial_velocity_max = 2.4
+	p.initial_velocity_max = 2.4 * sqrt(amount)
 	p.gravity = Vector3(0.0, -9.8, 0.0)
 	var drop := SphereMesh.new()
 	drop.radius = 0.008

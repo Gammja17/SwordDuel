@@ -45,6 +45,8 @@ var _sliders := {}
 
 const BAR_W := 420.0
 
+var _prompt: Label
+
 
 func _ready() -> void:
 	layer = 10
@@ -62,6 +64,19 @@ func _ready() -> void:
 
 	_build_enemy_box()
 	_build_player_box()
+
+	_prompt = Label.new()
+	_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_prompt.anchor_top = 0.56
+	_prompt.anchor_bottom = 0.56
+	_prompt.offset_left = -200
+	_prompt.offset_right = 200
+	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_prompt.add_theme_font_size_override("font_size", 30)
+	_prompt.add_theme_font_override("font", _title_font())
+	_prompt.add_theme_color_override("font_color", GOLD)
+	_prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_prompt)
 
 	_popup = Label.new()
 	_popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -185,6 +200,14 @@ func set_player(hp_frac: float, guard_frac: float, hurt: float, breath_frac := 1
 	_guard_fill.size.x = 300.0 * clampf(guard_frac, 0.0, 1.0)
 	_guard_fill.color = Color(0.95, 0.35, 0.2) if guard_frac > 0.66 else GOLD
 	_hurt.modulate.a = clampf(hurt, 0.0, 1.0) * 0.8
+
+
+## The key prompt for a special move ("" hides it); it pulses while shown.
+func set_prompt(text: String) -> void:
+	_prompt.text = text
+	_prompt.visible = text != ""
+	if _prompt.visible:
+		_prompt.modulate.a = 0.75 + 0.25 * sin(Time.get_ticks_msec() * 0.012)
 
 
 func popup(text: String, color: Color) -> void:

@@ -14,7 +14,7 @@ extends CharacterBody3D
 signal died
 signal attack_whiffed   # a cut ended without landing (dodged, fell short)
 
-enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD, DODGE }
+enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD, DODGE, HELD }
 
 const BodyScript := preload("res://knight_body.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
@@ -36,6 +36,7 @@ const WINDUP_DRAW := 0.55    # share of the windup spent drawing back; the rest 
 const CUT_ARC := 0.24        # how far the hands swing out in front mid-cut (m)
 const STRIKE_STEP := 2.2     # a step into each cut (m/s, fading: about 0.4 m)
 const BIND_GRIP := Vector3(0.04, -0.06, -0.34)
+const EXECUTE_BELOW := 0.3   # share of health below which a reeling fighter can be executed
 
 var hp := 100.0
 var max_hp := 100.0
@@ -82,6 +83,9 @@ var _move_ease := ""
 var _move_arc := 0.0
 var _via := {}   # a pose the move passes through halfway, or empty
 var _returning := false
+var _crit_until := -1.0     # (clock) open to a critical thrust until then
+var _recoil := 0.0          # 1 just after a blow landed: the torso snaps away from it
+var _recoil_side := 1.0
 
 # Blade state read by combat.gd, world space: the edge runs from base (front of the
 # crossguard) to tip; prev_* are last frame's positions.
@@ -216,9 +220,16 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 	hp = maxf(hp - clampf((strength - armor) * 2.8, 3.0, 34.0), 0.0)
 	_recent_cuts.append(_clock)
 	_body.flash()
-	Fx.cut_spray(get_tree().current_scene, pos, swing_dir)
+	Fx.cut_spray(get_tree().current_scene, pos, swing_dir, clampf(strength / 6.0, 0.6, 1.8))
 	Sfx.play("cut", pos, 0.0)
 	Sfx.play("hurt", pos, -5.0)
+	Sfx.play("armor", pos, -4.0)
+	# Every blow rocks it: the torso snaps away from the cut and it gives ground.
+	var side := to_local(pos).x
+	_recoil_side = signf(side) if absf(side) > 0.02 else 1.0
+	_recoil = clampf(0.4 + strength * 0.07, 0.4, 1.0)
+	if not is_attacking() and _state != State.BIND:
+		_push = global_transform.basis.z * (0.8 + strength * 0.12)
 	if hp <= 0.0:
 		_die()
 		return
@@ -243,7 +254,7 @@ func on_blade_clashed(_pos: Vector3, player_parried: bool, i_parried: bool) -> v
 	elif player_parried:
 		_in_combo = false
 		_enter(State.STAGGER)
-		_push = global_transform.basis.z * 1.6   # knocked back a step
+		_push = global_transform.basis.z * 0.8   # knocked back half a step (still in reach for a critical)
 	elif is_striking():
 		_in_combo = false
 		if randf() < float(_t.get("bind_press", 0.0)):
@@ -365,7 +376,7 @@ func _run_state(delta: float) -> void:
 	_watch_for_overswing()
 
 	match _state:
-		State.IDLE, State.BIND:
+		State.IDLE, State.BIND, State.HELD:
 			pass
 		State.APPROACH:
 			if dist > POISE_RANGE:
@@ -523,7 +534,7 @@ func _enter(state: int) -> void:
 		State.STAGGER:
 			_timer = float(_t.get("stagger", 0.9))
 			_sword_to(SwordPoses.make("thrown"), 0.12, "out")
-			_body.act("ual2/Hit_Knockback", 0.0, _body.clip_length("ual2/Hit_Knockback"), _timer, 0.08)
+			_body.act("Hit_Chest", 0.0, _body.clip_length("Hit_Chest"), _timer, 0.08)
 
 
 ## Windup: the sword drawn back for this cut, then held there until the strike.
@@ -601,6 +612,13 @@ func _update_sword(delta: float) -> void:
 		# A living guard: the point drifts a little with breathing.
 		shown = _pose.duplicate()
 		shown.grip = (_pose.grip as Vector3) + Vector3(sin(_clock * 1.7) * 0.01, sin(_clock * 2.3) * 0.012, 0.0)
+	if _recoil > 0.0:
+		# Rocked by a blow: leaning back and turned away from the side it came from.
+		shown = shown.duplicate()
+		shown.lean = float(shown.lean) - 0.45 * _recoil
+		shown.yaw = float(shown.yaw) - 0.35 * _recoil * _recoil_side
+		shown.grip = (shown.grip as Vector3) + Vector3(0.0, 0.05, 0.08) * _recoil
+		_recoil = maxf(_recoil - delta * 4.0, 0.0)
 	_body.pose(shown)
 
 
@@ -624,10 +642,65 @@ func _move(speed: float) -> void:
 	velocity.z = d.z
 
 
-func _die() -> void:
+# --- critical thrust and execution (the player's special moves drive these) -------
+
+## After a parry or a won bind it is wide open for a moment: the player can drive in a
+## critical thrust (E).
+func open_critical(seconds: float) -> void:
+	_crit_until = _clock + seconds
+
+
+func critical_open() -> bool:
+	return _state != State.DEAD and _state != State.HELD and _clock < _crit_until
+
+
+## Nearly beaten and reeling: the player can grab it and finish it (E).
+func can_be_executed() -> bool:
+	return _state != State.DEAD and _state != State.HELD and hp <= max_hp * EXECUTE_BELOW \
+		and (_state == State.STAGGER or critical_open())
+
+
+## A special move has hold of it: it stands helpless, arms flung wide, until released.
+func seize() -> void:
+	_state = State.HELD
+	_crit_until = -1.0
+	_in_combo = false
+	_wants_bind = false
+	_dodge_vel = Vector3.ZERO
+	var h: float = _body.clip_length("Hit_Chest") * 0.3
+	_body.act("Hit_Chest", h, h, 1.0, 0.08)
+	_sword_to(SwordPoses.make("thrown"), 0.15, "out")
+
+
+## Run through: heavy damage, or death (on its knees).
+func stabbed(damage: float, pos: Vector3, dir: Vector3) -> void:
+	if _state == State.DEAD:
+		return
+	hp = maxf(hp - damage, 0.0)
+	_recent_cuts.append(_clock)
+	_body.flash()
+	_recoil = 1.0
+	_recoil_side = 0.0
+	Fx.cut_spray(get_tree().current_scene, pos, -dir, 2.4)
+	Sfx.play("cut", pos, 3.0)
+	Sfx.play("hurt", pos, 0.0)
+	Sfx.play("armor", pos, -2.0)
+	if hp <= 0.0:
+		_die(true)
+
+
+## Let go of it: shoved away, reeling.
+func release_seized(push: float) -> void:
+	if _state != State.HELD:
+		return
+	_enter(State.STAGGER)
+	_push = global_transform.basis.z * push
+
+
+func _die(on_knees := false) -> void:
 	_state = State.DEAD
 	collision_layer = 0
-	_body.collapse()
+	_body.collapse(on_knees)
 	Sfx.play("block", global_position + Vector3(0, 0.3, 0), -2.0)
 	died.emit()
 

@@ -25,14 +25,14 @@ const Trail := preload("res://trail.gd")
 const REACH := SwordMesh.REACH
 const CUT_THRESHOLD := 3.0    # swing speed below which the blade doesn't cut
 const CLASH_THRESHOLD := 4.0  # blade-vs-blade relative speed above this = clash, below = bind
-const PARRY_SPEED := 2.5      # our own swing speed that turns meeting an attack into a parry
+const PARRY_SPEED := 4.0      # our own swing speed that turns meeting an attack into a parry
 const CUT_ARC := 0.22         # tip travel (m) since the swing began that a cut needs
-const PARRY_ARC := 0.12       # ... and a parry
+const PARRY_ARC := 0.2        # ... and a parry
 const SWING_START := 1.5      # swing speed at which a swing begins (below it, it ends)
 const CUT_POWER := 0.72       # tip speed -> cut strength (keeps damage where it was before the blade got quicker)
 const CUT_MAX := 9.5         # ... up to this for a big swing (the player's committed cut)
 const DRAG_MAX := 6.0         # ... and this for a blade only dragged by the mouse, however fast
-const HIT_COOLDOWN := 0.35    # delay before the same swing can cut again
+const HIT_COOLDOWN := 0.5     # delay before the same swing can cut again
 const CLASH_LOCK := 0.25      # after a clash the blade is bouncing; no cut/clash
 const SWING_SOUND_SPEED := 6.0
 # At rest the edge turns up (and a little right): the blade is seen edge-on, as when
@@ -82,7 +82,13 @@ func is_binding() -> bool:
 
 
 func can_cut() -> bool:
-	return clash_lock <= 0.0 and swing_speed >= CUT_THRESHOLD and swing_arc >= CUT_ARC
+	return clash_lock <= 0.0 and swing_speed >= CUT_THRESHOLD and swing_arc >= CUT_ARC and not _guarding()
+
+
+## Raising the guard moves the blade quickly too, but that is defending, not a swing.
+func _guarding() -> bool:
+	var p := get_parent()
+	return p != null and p.has_method("blade_on_guard") and p.blade_on_guard()
 
 
 func is_real_swing(min_speed: float, min_arc: float) -> bool:
@@ -180,9 +186,11 @@ func clash(point: Vector3, opp: Node, opp_vel: Vector3) -> String:
 	# A parry: swinging into it, or pressing guard just before it lands.
 	var p := get_parent()
 	var timed: bool = p != null and p.has_method("is_parry_window") and p.is_parry_window()
-	var parried := not they_parried and attacked and (is_real_swing(PARRY_SPEED, PARRY_ARC) or timed)
+	var parried := not they_parried and attacked and ((is_real_swing(PARRY_SPEED, PARRY_ARC) and not _guarding()) or timed)
 	var blocked := not they_parried and striking and not parried
 	var result := "CLANG!"
+	if parried and p.has_method("parry_landed"):
+		p.parry_landed()
 	if they_parried:
 		result = "PARRIED"
 	elif parried:
