@@ -71,6 +71,10 @@ const CUT_PIVOT := Vector3(0.05, 1.32, -0.1)   # between the shoulders, a little
 const CUT_TWIST := 0.42    # how far the shoulders and view turn each way (rad)
 const CUT_STEP := 3.0      # step into the cut (m/s at its start, fading)
 const CUT_GAP := 0.45      # a new cut can start this soon after one returns
+# After a cut, bringing the mouse back toward the middle is not a cut: for RECOVER_TIME
+# seconds a flick against the way the last cut went has to be RECOVER_MULT times as hard.
+const RECOVER_TIME := 1.6
+const RECOVER_MULT := 2.5
 const CUT_BREATH := 12.0   # below this much breath, there is no strength for a cut
 const CUT_COST := 12.0     # breath a big swing costs (all of it: its parts aren't charged as swings)
 
@@ -162,6 +166,8 @@ var _cut_twist := 0.0       # -1 drawn back .. +1 followed through (turns the vi
 var _cut_kick := 0.0        # 1 at the height of the swing
 var _cut_whoosh := false
 var _cut_gap := 0.0
+var _cut_dir := Vector2.ZERO   # the way the last cut went (aim units)
+var _since_cut := 99.0         # time since that cut finished returning
 var _cut_drag := 0.0        # a cut biting into its target slows for a moment
 var _punch := Vector2.ZERO  # the view jolted along a blow that landed
 var _special := ""          # "thrust" / "execute" while one plays, else ""
@@ -638,11 +644,15 @@ func _watch_flick(delta: float) -> void:
 	var moved := _aim_target - _prev_target
 	_prev_target = _aim_target
 	_cut_gap -= delta
+	_since_cut += delta
 	_recent = _recent * exp(-6.0 * delta) + moved
 	if _cut_t >= 0.0:
 		return
 	_flick = _flick * exp(-FLICK_DECAY * delta) + moved
-	if _flick.length() >= FLICK:
+	var need := FLICK
+	if _since_cut < RECOVER_TIME and _flick.normalized().dot(_cut_dir) < 0.2:
+		need = FLICK * RECOVER_MULT   # drifting back to the middle, not cutting
+	if _flick.length() >= need:
 		request_cut(_flick)
 
 
@@ -654,6 +664,7 @@ func request_cut(heading: Vector2) -> void:
 	# Across the view, tipped a little downward: level cuts fall slightly, like real ones.
 	_cut_side = (Vector3(heading.x, heading.y, 0.0).normalized() + Vector3(0.0, -0.2, 0.0)).normalized()
 	_cut_start = _held_pose()
+	_cut_dir = heading.normalized()
 	_cut_t = 0.0
 	_cut_whoosh = false
 	breath = maxf(breath - CUT_COST, 0.0)
@@ -756,6 +767,7 @@ func _cut_pose(delta: float, held: Array) -> Array:
 			_cut_t = -1.0
 			_cut_twist = 0.0
 			_cut_gap = CUT_GAP
+			_since_cut = 0.0
 			_prev_target = _aim_target
 			_flick = Vector2.ZERO
 	_cut_now = out
