@@ -214,12 +214,14 @@ func clash(point: Vector3, opp: Node, opp_vel: Vector3) -> String:
 			# A passive block knocks our guard open and fills the guard meter.
 			if p.absorb_block(h):
 				result = "GUARD BROKEN"
+		elif parried:
+			p.parry_success(h)
 		else:
 			p.deflect(Vector2(h * 0.30, 0.18), 0.18)
 	clash_registered.emit(point, result)
 
 	if opp != null and opp.has_method("on_blade_clashed"):
-		opp.on_blade_clashed(point, parried, they_parried)
+		opp.on_blade_clashed(point, parried, they_parried, _swing_dir)
 
 	var scene := get_tree().current_scene
 	match result:
@@ -229,6 +231,7 @@ func clash(point: Vector3, opp: Node, opp_vel: Vector3) -> String:
 		"PARRY!":
 			Sfx.play("parry", point, 2.0)
 			Fx.sparks(scene, point, 1.3)
+			Fx.shockwave(scene, point)
 		"BLOCKED":
 			Sfx.play("block", point, 0.0)
 			Fx.sparks(scene, point, 0.6)

@@ -48,6 +48,12 @@ static func parry(side: float) -> Dictionary:
 		Vector3(-side, 0.0, -1.0), -0.2 * side, 0.05)
 
 
+## Parried: the blade batted wide to the side it was struck toward, arm thrown out.
+static func knocked(side: float) -> Dictionary:
+	return build(Vector3(0.30 * side, 0.05, -0.05), Vector3(1.0 * side, 0.35, -0.2),
+		Vector3(0.0, 1.0, 0.0), -0.35 * side, -0.2)
+
+
 ## Holding the blade from the grip toward a point (a bind's crossing), body space
 ## relative to the upper chest.
 static func aimed(grip: Vector3, toward: Vector3) -> Dictionary:

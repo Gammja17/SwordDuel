@@ -86,6 +86,7 @@ var _returning := false
 var _crit_until := -1.0     # (clock) open to a critical thrust until then
 var _recoil := 0.0          # 1 just after a blow landed: the torso snaps away from it
 var _recoil_side := 1.0
+var _wobble := 0.0          # 1 right after being parried: the body sways, settling
 
 # Blade state read by combat.gd, world space: the edge runs from base (front of the
 # crossguard) to tip; prev_* are last frame's positions.
@@ -248,13 +249,16 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 ##   - they swung into our cut or windup (parry): we stagger, wide open
 ##   - they only held the line against our cut (block): come again quickly, or bind
 ##   - they cut into our guard: some fighters answer at once or bind
-func on_blade_clashed(_pos: Vector3, player_parried: bool, i_parried: bool) -> void:
+func on_blade_clashed(pos: Vector3, player_parried: bool, i_parried: bool, blade_dir := Vector3.ZERO) -> void:
 	if i_parried:
 		_start_windup(0.65)
 	elif player_parried:
 		_in_combo = false
 		_enter(State.STAGGER)
-		_push = global_transform.basis.z * 0.8   # knocked back half a step (still in reach for a critical)
+		var side := signf(global_transform.basis.x.dot(blade_dir))
+		if side == 0.0:
+			side = signf(to_local(pos).x)
+		_knocked(side if side != 0.0 else 1.0)
 	elif is_striking():
 		_in_combo = false
 		if randf() < float(_t.get("bind_press", 0.0)):
@@ -268,6 +272,20 @@ func on_blade_clashed(_pos: Vector3, player_parried: bool, i_parried: bool) -> v
 			_start_windup(0.7)
 		elif r < riposte + float(_t.get("bind_press", 0.0)) * 0.5:
 			_wants_bind = true
+
+
+## Parried: the blade is batted wide, the body reels back a step and sways before it
+## finds its feet.
+func _knocked(side: float) -> void:
+	_recoil = 1.6
+	_recoil_side = side
+	_wobble = 1.0
+	_push = global_transform.basis.z * 2.6   # about 55 cm (a critical is still in reach)
+	_sword_to(SwordPoses.knocked(side), 0.1, "out")
+	var clip := "ual2/Hit_Knockback"
+	if _body.clip_length(clip) <= 0.0:
+		clip = "Hit_Chest"
+	_body.act(clip, 0.0, _body.clip_length(clip), _timer, 0.05)
 
 
 func guard_broken() -> void:
@@ -619,6 +637,12 @@ func _update_sword(delta: float) -> void:
 		shown.yaw = float(shown.yaw) - 0.35 * _recoil * _recoil_side
 		shown.grip = (shown.grip as Vector3) + Vector3(0.0, 0.05, 0.08) * _recoil
 		_recoil = maxf(_recoil - delta * 4.0, 0.0)
+	if _wobble > 0.0:
+		# Reeling after a parry: swaying side to side, settling.
+		shown = shown.duplicate()
+		shown.yaw = float(shown.yaw) + sin(_clock * 18.0) * 0.28 * _wobble * _wobble
+		shown.lean = float(shown.lean) + sin(_clock * 13.0) * 0.12 * _wobble
+		_wobble = maxf(_wobble - delta * 1.3, 0.0)
 	_body.pose(shown)
 
 

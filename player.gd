@@ -284,6 +284,17 @@ func deflect(kick: Vector2, duration: float = 0.12, damp: float = 0.6) -> void:
 	add_trauma(0.18)
 
 
+## We parried: the blade snaps across and rings out, then is ours again almost at once.
+func parry_success(h: float) -> void:
+	_aim = _clamp_aim(_aim + Vector2(h * 0.55, 0.30))
+	_aim_vel = Vector2(h * 2.2, 0.8)
+	_abort_cut()
+	_deflect_timer = 0.08
+	_deflect_damp = 0.8
+	_punch = Vector2(h * 0.05, 0.04)
+	add_trauma(0.3)
+
+
 ## We only BLOCKED a cut (held the line, didn't swing into it). Fills the guard meter;
 ## returns true if that broke the guard.
 func absorb_block(h: float) -> bool:

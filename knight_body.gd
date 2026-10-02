@@ -52,12 +52,20 @@ const FINGERS := ["Thumb", "Index", "Middle", "Ring", "Little"]
 # hair texture is grey, made to be tinted). The face and neck come from the base
 # character; the rest of its body stays hidden under the clothes.
 const OUTFIT_DIR := "res://assets/characters/outfits/"
+const FEMALE_FACE := "Superhero_Female_FullBody"
 const OUTFITS := {
 	"squire": ["Male_Peasant", ["Hair_SimpleParted"], Color(1.0, 1.0, 1.0), Color(0.36, 0.22, 0.12)],
 	"knight": ["Male_Ranger", ["Hair_Beard"], Color(0.95, 0.66, 0.5), Color(0.22, 0.14, 0.09)],
 	"master": ["Male_Ranger", ["Hair_Beard"], Color(0.42, 0.40, 0.40), Color(0.55, 0.53, 0.50)],
 	# The player, seen only in an execution: the outfit's own green.
 	"player": ["Male_Ranger", ["Hair_Beard"], Color(1.0, 1.0, 1.0), Color(0.18, 0.12, 0.08)],
+	# Story rivals: the same clothes in their own colours.
+	"taesan": ["Male_Peasant", ["Hair_Buzzed"], Color(0.62, 0.55, 0.50), Color(0.10, 0.07, 0.05)],
+	"leon": ["Male_Ranger", ["Hair_SimpleParted"], Color(0.95, 0.85, 0.45), Color(0.62, 0.45, 0.22)],
+	"kaiden": ["Male_Ranger", ["Hair_SimpleParted"], Color(0.50, 0.62, 0.95), Color(0.85, 0.80, 0.55)],
+	# Women: the fifth entry is the base body whose face and eyes show (the default is the man's).
+	"woman_peasant": ["Female_Peasant", ["Hair_Long"], Color(1.0, 1.0, 1.0), Color(0.30, 0.18, 0.10), FEMALE_FACE],
+	"woman_ranger": ["Female_Ranger", ["Hair_Buns"], Color(0.62, 0.50, 0.85), Color(0.78, 0.62, 0.30), FEMALE_FACE],
 }
 const HEAD_BONES := ["Head", "Neck"]
 const SEGMENTS := ["Metacarpal", "Proximal", "Intermediate", "Distal"]
@@ -215,7 +223,7 @@ func _dress_outfit(kind: String) -> void:
 	if body_mesh:
 		body_mesh.visible = false
 	var o: Array = OUTFITS[kind]
-	_wear("Superhero_Male_FullBody", HEAD_BONES, Color.WHITE, false, o[3])   # the face, eyes and brows
+	_wear(o[4] if o.size() > 4 else "Superhero_Male_FullBody", HEAD_BONES, Color.WHITE, false, o[3])   # the face, eyes and brows
 	_wear(o[0], [], o[2], true)
 	for piece in o[1]:
 		_wear(piece, [], Color.WHITE, false, o[3])
@@ -292,6 +300,9 @@ static func _only_on_bones(mesh: Mesh, skin: Skin, bones: Array) -> ArrayMesh:
 		if kept.is_empty():
 			continue
 		arr[Mesh.ARRAY_INDEX] = kept
+		# (The woman's base body carries custom vertex data a rebuilt surface can't take.)
+		for c in [Mesh.ARRAY_CUSTOM0, Mesh.ARRAY_CUSTOM1, Mesh.ARRAY_CUSTOM2, Mesh.ARRAY_CUSTOM3]:
+			arr[c] = null
 		var flags: int = mesh.surface_get_format(s) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
 		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
 		out.surface_set_material(out.get_surface_count() - 1, mesh.surface_get_material(s))

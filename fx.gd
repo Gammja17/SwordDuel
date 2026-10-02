@@ -48,6 +48,27 @@ static func sparks(parent: Node, pos: Vector3, strength := 1.0) -> void:
 	parent.get_tree().create_timer(1.0).timeout.connect(p.queue_free)
 
 
+## A gold bubble that swells and fades where the blades met (a parry).
+static func shockwave(parent: Node, pos: Vector3) -> void:
+	var m := MeshInstance3D.new()
+	var s := SphereMesh.new()
+	s.radius = 0.1
+	s.height = 0.2
+	m.mesh = s
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1.0, 0.85, 0.4, 0.55)
+	m.material_override = mat
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(m)
+	m.global_position = pos
+	var tw := parent.get_tree().create_tween().set_parallel(true)
+	tw.tween_property(m, "scale", Vector3.ONE * 5.0, 0.22).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.22)
+	tw.chain().tween_callback(m.queue_free)
+
+
 static func cut_spray(parent: Node, pos: Vector3, dir: Vector3, amount := 1.0) -> void:
 	if _drop_mat == null:
 		_drop_mat = StandardMaterial3D.new()

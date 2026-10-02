@@ -13,8 +13,11 @@ const CombatScript := preload("res://combat.gd")
 const Cinematic := preload("res://cinematic.gd")
 const Armor := preload("res://armor.gd")
 const SwordMesh := preload("res://sword_mesh.gd")
+const Campaign := preload("res://campaign.gd")
+const Scenes := preload("res://scenes.gd")
+const StoryScene := preload("res://story_scene.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -23,45 +26,6 @@ const SKY_HDRI := "res://assets/hdri/sky_1k.hdr"
 const SAVE_PATH := "user://progress.cfg"
 const GOLD := Color(0.98, 0.82, 0.35)
 const RED := Color(0.95, 0.35, 0.25)
-
-const TIERS := [
-	{
-		"kicker": "첫 번째 상대",
-		"name": "수련기사 도윤",
-		"about": "기사단에 들어온 지 한 해 된 수련기사입니다. 동작이 크고 느려서 칼을 치켜드는 게 잘 보입니다.",
-		"hp": 70.0, "windup": 0.55, "attack": 0.26, "recover": 0.7, "stagger": 0.85,
-		"poise": Vector2(1.0, 1.8), "attack_prob": 0.6, "lines": ["c"], "dodge": 0.0, "parry_window": 0.25, "windup_jitter": 0.0,
-		"feint": 0.0, "combo": 0.0, "punish": 0.15, "riposte": 0.0, "damage": 0.5,
-		"armor": 0.5, "flinch_speed": 6.0,
-		"parry": 0.1, "bind_press": 0.25, "bind_strength": 0.5, "bind_switch": Vector2(2.2, 3.2), "exit_cut": 0.2,
-		"guard_track": 4.0, "speed": 2.2,
-		"tabard": Color(0.20, 0.30, 0.55), "crest": false, "outfit": "squire",
-	},
-	{
-		"kicker": "두 번째 상대",
-		"name": "기사 서혁",
-		"about": "좌우로 번갈아 베고, 가끔 치켜든 쪽을 바꿔 속입니다. 함부로 휘두르면 받아칩니다.",
-		"hp": 85.0, "windup": 0.46, "attack": 0.23, "recover": 0.6, "stagger": 0.7,
-		"poise": Vector2(0.6, 1.3), "attack_prob": 0.7, "lines": ["a", "b", "c"], "dodge": 0.15, "parry_window": 0.18, "windup_jitter": 0.15,
-		"feint": 0.25, "combo": 0.15, "punish": 0.4, "riposte": 0.3, "damage": 0.65,
-		"armor": 2.0, "flinch_speed": 9.0,
-		"parry": 0.3, "bind_press": 0.35, "bind_strength": 0.6, "bind_switch": Vector2(1.7, 2.7), "exit_cut": 0.45,
-		"guard_track": 7.0, "speed": 2.5,
-		"tabard": Color(0.55, 0.12, 0.10), "crest": false, "outfit": "knight",
-	},
-	{
-		"kicker": "마지막 상대",
-		"name": "검술사범 무진",
-		"about": "기사단에 검술을 가르치는 사범입니다. 빠르고, 달려들며 베기와 연속 베기를 섞습니다. 칼이 맞물리면 힘이 셉니다.",
-		"hp": 115.0, "windup": 0.40, "attack": 0.19, "recover": 0.45, "stagger": 0.55,
-		"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "lunge"], "dodge": 0.25, "parry_window": 0.14, "windup_jitter": 0.2,
-		"feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5, "damage": 0.72,
-		"armor": 3.0, "flinch_speed": 11.0,
-		"parry": 0.45, "bind_press": 0.5, "bind_strength": 0.8, "bind_switch": Vector2(1.3, 2.2), "exit_cut": 0.7,
-		"guard_track": 12.0, "speed": 2.8,
-		"tabard": Color(0.10, 0.10, 0.12), "crest": true, "outfit": "master",
-	},
-]
 
 # The squire as a patient sparring partner: slow, harmless, never parries or feints.
 const PRACTICE_TIER := {
@@ -86,6 +50,10 @@ var auto_pause := true        # losing the mouse mid-fight opens the settings (o
 
 var _phase: int = Phase.TITLE
 var _tier := 0
+var _stage := 0               # the next duel to fight (saved)
+var _rank := Campaign.START_RANK   # the standing in the school (saved)
+var _entrance_seen := false
+var _ending := ""
 var _player: CharacterBody3D
 var _opponent: CharacterBody3D
 var _combat: Node
@@ -182,6 +150,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			and (event as InputEventKey).physical_keycode == KEY_P:
 		_start_practice()
 		return
+	if _phase == Phase.TITLE and event is InputEventKey and event.pressed 			and (event as InputEventKey).physical_keycode == KEY_N:
+		_reset_campaign()
+		_to_title()
+		return
+	if _phase == Phase.CHOICE and event is InputEventKey and event.pressed and not event.is_echo():
+		var k := (event as InputEventKey).physical_keycode
+		if k == KEY_1:
+			_choose("execute")
+		elif k == KEY_2:
+			_choose("spare")
+		return
 	if click or key:
 		_advance()
 
@@ -194,24 +173,30 @@ func _advance() -> void:
 	match _phase:
 		Phase.TITLE:
 			_totals = _new_stats()
-			if _practice_done:
-				_intro(0)
+			if not _entrance_seen:
+				_entrance_seen = true
+				_save_progress()
+				_run_scenes(["entrance"], _start_practice if not _practice_done else _begin_stage.bind(_stage))
+			elif _practice_done:
+				_begin_stage(_stage)
 			else:
 				_start_practice()
 		Phase.PRACTICE_DONE:
 			_totals = _new_stats()
-			_intro(0)
+			_begin_stage(_stage)
 		Phase.INTRO:
 			_start_fight()
 		Phase.OUTCOME:
 			if _stats.get("won", false):
-				if _tier + 1 < TIERS.size():
-					_intro(_tier + 1)
+				var post: Array = Campaign.STAGES[_tier]["post"].duplicate()
+				if _tier + 1 < Campaign.count():
+					_run_scenes(post, _begin_stage.bind(_tier + 1))
 				else:
-					_final()
+					_choice()
 			else:
 				_intro(_tier)
 		Phase.FINAL:
+			_reset_campaign()
 			_to_title()
 
 
@@ -221,16 +206,17 @@ func _to_title() -> void:
 	# A knight waiting in the courtyard while the camera circles.
 	_opponent = OpponentScript.new()
 	add_child(_opponent)
-	_opponent.setup(null, TIERS[0])
+	_opponent.setup(null, Campaign.tier(0))
 	_title_cam.current = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.show_fight_ui(false)
 	_hud.clear_hint()
 	_hud.clear_task()
 	_hud.hide_bind()
-	_hud.show_card("1대1 검술 결투", "진검승부",
-		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 구르기, 우클릭 막기와 쳐내기\n쳐낸 뒤 E를 누르면 치명타, 거의 쓰러진 상대는 처형\n휠 클릭 락온 켜고 끄기\n세 사람을 차례로 이기면 끝납니다.",
-		"클릭하면 시작합니다\nP를 누르면 연습을 다시 합니다" if _practice_done else "클릭하면 연습부터 시작합니다")
+	var standing := "" if _stage == 0 else "\n\n현재 석차 %d위 · %d번째 상대 앞" % [_rank, _stage + 1]
+	_hud.show_card("왕립 철검관 · 1대1 검술 결투", "진검승부",
+		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 구르기, 우클릭 막기와 쳐내기\n쳐낸 뒤 E를 누르면 치명타, 거의 쓰러진 상대는 처형\n휠 클릭 락온 켜고 끄기\n순위전을 이겨 수석으로 졸업하세요." + standing,
+		("클릭하면 " + ("이어합니다" if _stage > 0 else "시작합니다") + "\nP 연습 다시 · N 처음부터") if _practice_done else "클릭하면 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
 
@@ -238,8 +224,8 @@ func _to_title() -> void:
 func _intro(tier: int) -> void:
 	_tier = tier
 	_phase = Phase.INTRO
-	_spawn_duel(TIERS[tier])
-	var t: Dictionary = TIERS[tier]
+	_spawn_duel(Campaign.tier(tier))
+	var t: Dictionary = Campaign.tier(tier)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.show_fight_ui(false)
 	_hud.clear_hint()
@@ -281,25 +267,91 @@ func _outcome() -> void:
 	_hud.hide_bind()
 	for k in ["parries", "blocks", "cuts", "hits", "binds_won", "binds_lost", "parried_me"]:
 		_totals[k] += _stats[k]
-	var t: Dictionary = TIERS[_tier]
+	var t: Dictionary = Campaign.tier(_tier)
 	var name_: String = t["name"]
 	if _stats["won"]:
-		var last := _tier + 1 >= TIERS.size()
-		_hud.show_card("승리", name_, name_ + _obj_particle(name_) + " 쓰러뜨렸습니다.\n\n" + _stats_line(_stats),
-			"클릭하면 결과를 봅니다" if last else "클릭하면 다음 상대로 넘어갑니다")
+		var before := _rank
+		_rank = Campaign.rank_after_win(_tier, _rank)
+		_stage = _tier + 1
+		_save_progress()
+		var moved := "" if _rank == before else "\n석차 %d위 → %d위" % [before, _rank]
+		_hud.show_card("승리", name_, name_ + _obj_particle(name_) + " 쓰러뜨렸습니다." + moved + "\n\n" + _stats_line(_stats),
+			"클릭하면 이야기가 이어집니다")
 	else:
-		_hud.show_card("패배", name_, name_ + "에게 쓰러졌습니다.\n\n" + _stats_line(_stats) + "\n\n" + _advice(),
+		var before := _rank
+		_rank = Campaign.rank_after_loss(_tier, _rank)
+		_save_progress()
+		var moved := "" if _rank == before else "\n석차가 %d위에서 %d위로 내려갔습니다." % [before, _rank]
+		_hud.show_card("패배", name_, name_ + "에게 쓰러졌습니다." + moved + "\n\n" + _stats_line(_stats) + "\n\n" + _advice(),
 			"클릭하면 다시 겨룹니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
 	_set_fps()
 
 
+## The boss is down: carry out the blow, or let him live and speak (1 / 2).
+func _choice() -> void:
+	_phase = Phase.CHOICE
+	_hud.show_fight_ui(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_hud.show_card("마지막 선택", "발도르가 무릎을 꿇었다",
+		"그는 안개 골짜기에서 있었던 일을 아는 유일한 사람입니다.\n\n1  처형한다. 아버지의 복수는 끝나고, 진실은 묻힌다.\n2  살려서 증언하게 한다. 진실이 밝혀지지만 대가가 따른다.",
+		"1 또는 2 키로 고르세요")
+	_set_fps()
+
+
+func _choose(ending: String) -> void:
+	_ending = ending
+	_save_progress()
+	_run_scenes(["end_" + ending], _final)
+
+
 func _final() -> void:
 	_phase = Phase.FINAL
+	_clear_duel()
+	_title_cam.current = true
 	_hud.show_fight_ui(false)
-	_hud.show_card("진검승부", "완승", "세 사람을 모두 이겼습니다.\n\n" + _stats_line(_totals),
-		"클릭하면 처음 화면으로 돌아갑니다")
+	var what := "복수를 마치고 영웅이 되었습니다. 공훈 제도는 그대로 남았습니다." if _ending == "execute" \
+		else "진실을 밝혔습니다. 귀족 의회가 흔들리고, 공훈 제도는 폐지되기 시작했습니다."
+	_hud.show_card("졸업", "수석 졸업", what + "\n\n" + _stats_line(_totals), "클릭하면 처음 화면으로 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
+	_set_fps()
+
+
+# --- story: stages and cutscenes ------------------------------------------------------
+
+func _reset_campaign() -> void:
+	_stage = 0
+	_rank = Campaign.START_RANK
+	_ending = ""
+	_save_progress()
+
+
+## Cutscenes before the duel, then the duel's card.
+func _begin_stage(i: int) -> void:
+	_tier = i
+	_run_scenes(Campaign.STAGES[i]["pre"].duplicate(), _intro.bind(i))
+
+
+## Play the scenes one after another, then call `done`.
+func _run_scenes(ids: Array, done: Callable) -> void:
+	if ids.is_empty():
+		done.call()
+		return
+	var id: String = ids.pop_front()
+	_phase = Phase.SCENE
+	_clear_duel()
+	_title_cam.current = true
+	_hud.hide_card()
+	_hud.show_fight_ui(false)
+	_hud.clear_hint()
+	_hud.clear_task()
+	_hud.hide_bind()
+	var s := StoryScene.new()
+	add_child(s)
+	s.finished.connect(func():
+		_title_cam.current = true
+		_run_scenes(ids, done))
+	s.play(Scenes.get_scene(id))
 	_set_fps()
 
 
@@ -616,6 +668,10 @@ func _load_progress() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
 		_practice_done = bool(cfg.get_value("progress", "practice_done", false))
+		_entrance_seen = bool(cfg.get_value("progress", "entrance_seen", false))
+		_stage = clampi(int(cfg.get_value("progress", "stage", 0)), 0, Campaign.count() - 1)
+		_rank = int(cfg.get_value("progress", "rank", Campaign.START_RANK))
+		_ending = String(cfg.get_value("progress", "ending", ""))
 		for bus in _volumes:
 			_volumes[bus] = float(cfg.get_value("volume", bus, _volumes[bus]))
 
@@ -623,6 +679,10 @@ func _load_progress() -> void:
 func _save_progress() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("progress", "practice_done", _practice_done)
+	cfg.set_value("progress", "entrance_seen", _entrance_seen)
+	cfg.set_value("progress", "stage", _stage)
+	cfg.set_value("progress", "rank", _rank)
+	cfg.set_value("progress", "ending", _ending)
 	for bus in _volumes:
 		cfg.set_value("volume", bus, _volumes[bus])
 	cfg.save(SAVE_PATH)
@@ -631,7 +691,7 @@ func _save_progress() -> void:
 ## 60 fps while fighting, 30 on the cards between fights. (Called on every phase
 ## change, so it also shows the settings button on card screens.)
 func _set_fps() -> void:
-	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE
+	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE
 	Engine.max_fps = 60 if fighting else 30
 	_hud.show_settings_button(not fighting and not _menu_open)
 
@@ -656,7 +716,7 @@ func _close_menu(to_title: bool) -> void:
 	_menu_open = false
 	_hud.hide_settings()
 	_save_progress()
-	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE
+	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE
 	get_tree().paused = false
 	if to_title:
 		_to_title()
