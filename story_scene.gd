@@ -39,6 +39,8 @@ var _speed := WALK_SPEED
 var _drift := Vector3.ZERO
 var _look: Variant = null    # where the camera looks: a point, or an actor id
 var _done := false
+var flags := {}              # choices made in scenes (main.gd keeps and saves it)
+var _choice := {}            # the choice beat waiting for 1 / 2, if any
 var _layer: CanvasLayer
 var _name: Label
 var _text: Label
@@ -90,7 +92,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		advance()
 	elif event is InputEventKey and event.pressed and not event.is_echo():
 		var k := (event as InputEventKey).physical_keycode
-		if k == KEY_ESCAPE:
+		if not _choice.is_empty() and (k == KEY_1 or k == KEY_2):
+			_pick(0 if k == KEY_1 else 1)
+		elif k == KEY_ESCAPE:
 			skip()
 		elif k == KEY_SPACE or k == KEY_ENTER:
 			advance()
@@ -118,6 +122,7 @@ func _next() -> void:
 		return
 	var b: Dictionary = _beats[_i]
 	_t = 0.0
+	_panel.visible = false
 	_dur = float(b.get("dur", 2.0))
 	_speed = float(b.get("speed", WALK_SPEED))
 	if b.has("cam"):
@@ -133,6 +138,11 @@ func _next() -> void:
 			_actors[id].body.release(0.3)
 		else:
 			_play_clip(id)
+	if b.has("choice"):
+		_start_choice(b["choice"])
+		return
+	if b.has("line_if"):
+		b["line"] = b["line_if"]["lines"][int(flags.get(b["line_if"]["key"], 0))]
 	_has_line = b.has("line")
 	_panel.visible = _has_line
 	if _has_line:
@@ -144,10 +154,39 @@ func _next() -> void:
 func _end() -> void:
 	if _done:
 		return
+	if not _choice.is_empty():
+		flags[_choice["key"]] = 0   # skipped past a choice: the kinder answer
 	_done = true
 	_layer.queue_free()
 	finished.emit()
 	queue_free()
+
+
+# --- choices --------------------------------------------------------------------------------
+
+## A beat {"choice": {"key": flag name, "prompt": text, "options": [a, b]}}: wait for 1 / 2 and
+## store the pick (0 or 1) in flags[key].
+func _start_choice(c: Dictionary) -> void:
+	_choice = c
+	_has_line = false
+	_dur = 1.0e9
+	_panel.visible = true
+	_name.text = ""
+	var lines: String = c["prompt"] + "\n"
+	for i in c["options"].size():
+		lines += "\n%d  %s" % [i + 1, c["options"][i]]
+	_text.text = lines
+	_text.visible_characters = -1
+	_hint.text = "1 / 2 키로 고르세요"
+
+
+func _pick(i: int) -> void:
+	if _choice.is_empty() or i >= _choice["options"].size():
+		return
+	flags[_choice["key"]] = i
+	_choice = {}
+	_hint.text = "클릭: 다음   Esc: 건너뛰기"
+	_next()
 
 
 # --- actors -----------------------------------------------------------------------------

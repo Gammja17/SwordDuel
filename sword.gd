@@ -266,5 +266,7 @@ func try_cut(body: Node, point: Vector3) -> void:
 	var p := get_parent()
 	var big: bool = p != null and p.has_method("is_big_swing") and p.is_big_swing()
 	var strength := minf(tip_speed * CUT_POWER, CUT_MAX if big else DRAG_MAX)
+	if p != null and p.has_method("mod"):
+		strength *= 1.0 + p.mod("cut_power")
 	body.receive_cut(strength, point, _swing_dir)
 	cut_registered.emit(strength, point)

@@ -16,8 +16,9 @@ const SwordMesh := preload("res://sword_mesh.gd")
 const Campaign := preload("res://campaign.gd")
 const Scenes := preload("res://scenes.gd")
 const StoryScene := preload("res://story_scene.gd")
+const Boons := preload("res://boons.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -54,6 +55,10 @@ var _stage := 0               # the next duel to fight (saved)
 var _rank := Campaign.START_RANK   # the standing in the school (saved)
 var _entrance_seen := false
 var _ending := ""
+var _flags := {}              # choices made in cutscenes (saved)
+var _boons: Array = []        # ids of the learned techniques (saved)
+var _boon_offer: Array = []
+var _boon_next := 0
 var _war := false             # the courtyard is burning
 var _war_nodes: Array[Node] = []
 var _sun: DirectionalLight3D
@@ -158,6 +163,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_reset_campaign()
 		_to_title()
 		return
+	if _phase == Phase.BOON and event is InputEventKey and event.pressed and not event.is_echo():
+		var bk := (event as InputEventKey).physical_keycode
+		if bk == KEY_1:
+			_take_boon(0)
+		elif bk == KEY_2:
+			_take_boon(1)
+		elif bk == KEY_3:
+			_take_boon(2)
+		return
 	if _phase == Phase.CHOICE and event is InputEventKey and event.pressed and not event.is_echo():
 		var k := (event as InputEventKey).physical_keycode
 		if k == KEY_1:
@@ -194,9 +208,11 @@ func _advance() -> void:
 			if _stats.get("won", false):
 				var post: Array = Campaign.STAGES[_tier]["post"].duplicate()
 				if _tier + 1 < Campaign.count():
-					_run_scenes(post, _begin_stage.bind(_tier + 1))
-				else:
+					_run_scenes(post, _boon_pick.bind(_tier + 1))
+				elif _ending == "":
 					_choice()
+				else:
+					_choose(_ending)
 			else:
 				_intro(_tier)
 		Phase.FINAL:
@@ -219,6 +235,8 @@ func _to_title() -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	var standing := "" if _stage == 0 else "\n\n현재 석차 %d위 · %d번째 상대 앞" % [_rank, _stage + 1]
+	if not _boons.is_empty():
+		standing += "\n익힌 기예: " + _boon_names()
 	_hud.show_card("왕립 철검관 · 1대1 검술 결투", "진검승부",
 		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 구르기, 우클릭 막기와 쳐내기\n쳐낸 뒤 E를 누르면 치명타, 거의 쓰러진 상대는 처형\n휠 클릭 락온 켜고 끄기\n순위전을 이겨 수석으로 졸업하세요." + standing,
 		("클릭하면 " + ("이어합니다" if _stage > 0 else "시작합니다") + "\nP 연습 다시 · N 처음부터") if _practice_done else "클릭하면 시작합니다")
@@ -230,6 +248,7 @@ func _intro(tier: int) -> void:
 	_tier = tier
 	_phase = Phase.INTRO
 	_spawn_duel(Campaign.tier(tier))
+	_player.mods = Boons.mods_of(_boons)
 	var t: Dictionary = Campaign.tier(tier)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.show_fight_ui(false)
@@ -252,7 +271,20 @@ func _start_fight() -> void:
 	_set_fps()
 
 
+## Run through (or cut down) in the last duel: the finishing blow was the player's choice.
 func _on_opponent_died() -> void:
+	if _tier + 1 >= Campaign.count():
+		_ending = "execute"
+	_won()
+
+
+## The last fighter kneels instead of dying: the choice is left to the player.
+func _on_boss_yield() -> void:
+	_ending = ""
+	_won()
+
+
+func _won() -> void:
 	_stats["won"] = true
 	_player.active = false
 	get_tree().create_timer(1.6).timeout.connect(_outcome)
@@ -308,6 +340,14 @@ func _choose(ending: String) -> void:
 	_ending = ending
 	_set_war(false)   # the graduation is held once the fire is out
 	_save_progress()
+	if ending == "execute" and _phase == Phase.CHOICE and is_instance_valid(_opponent) and _opponent.is_yielded():
+		# The blow, then the scene.
+		_phase = Phase.SCENE
+		_hud.hide_card()
+		_opponent.finish()
+		_hitstop(0.2)
+		get_tree().create_timer(1.6).timeout.connect(_run_scenes.bind(["end_execute"], _final))
+		return
 	_run_scenes(["end_" + ending], _final)
 
 
@@ -323,12 +363,52 @@ func _final() -> void:
 	_set_fps()
 
 
+# --- boons (기예) ---------------------------------------------------------------------------
+
+## After a win: three techniques to learn, one is kept. Then on to the next duel.
+func _boon_pick(next_stage: int) -> void:
+	_boon_offer = Boons.roll(_boons)
+	if _boon_offer.is_empty():
+		_begin_stage(next_stage)
+		return
+	_phase = Phase.BOON
+	_boon_next = next_stage
+	_clear_duel()
+	_title_cam.current = true
+	_hud.show_fight_ui(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var body := ""
+	for i in _boon_offer.size():
+		var b: Dictionary = _boon_offer[i]
+		body += "%d  %s\n     %s\n\n" % [i + 1, b["name"], b["text"]]
+	_hud.show_card("스승에게 배운다", "기예를 하나 익히세요", body.strip_edges(), "1, 2, 3 키로 고르세요")
+	_set_fps()
+
+
+func _take_boon(i: int) -> void:
+	if i >= _boon_offer.size():
+		return
+	_boons.append(_boon_offer[i]["id"])
+	_save_progress()
+	_hud.popup(_boon_offer[i]["name"], GOLD)
+	_begin_stage(_boon_next)
+
+
+func _boon_names() -> String:
+	var names := []
+	for id in _boons:
+		names.append(Boons.get_boon(id).get("name", id))
+	return ", ".join(names)
+
+
 # --- story: stages and cutscenes ------------------------------------------------------
 
 func _reset_campaign() -> void:
 	_stage = 0
 	_rank = Campaign.START_RANK
 	_ending = ""
+	_flags = {}
+	_boons = []
 	_save_progress()
 
 
@@ -354,11 +434,13 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	var s := StoryScene.new()
+	s.flags = _flags
 	add_child(s)
 	s.finished.connect(func():
 		_title_cam.current = true
+		_save_progress()
 		_run_scenes(ids, done))
-	s.play(Scenes.get_scene(id))
+	s.play(Scenes.get_scene(id, _flags))
 	_set_fps()
 
 
@@ -411,6 +493,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.died.connect(_on_player_died)
 	_opponent.died.connect(_on_opponent_died)
 	_opponent.phase_changed.connect(_on_boss_phase)
+	_opponent.yielded.connect(_on_boss_yield)
 	_opponent.attack_whiffed.connect(_on_attack_whiffed)
 
 
@@ -513,11 +596,12 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 	match result:
 		"PARRY!":
 			_stats["parries"] += 1
+			_player.hp = minf(_player.hp + _player.mod("parry_heal"), 100.0)
 			_hud.popup("쳐내기!", GOLD)
 			_hitstop(0.09)
 			_slowmo(0.35, 0.3)
 			if is_instance_valid(_opponent) and _phase == Phase.FIGHT:
-				_opponent.open_critical(2.2)
+				_opponent.open_critical(2.2 + _player.mod("crit_time"))
 				_hint_once("crit", "상대가 무너졌어요. 다가가서 E를 누르면 치명타")
 			if _step_id() == "parry":
 				_practice_success()
@@ -622,7 +706,7 @@ func _on_bind_ended(result: String) -> void:
 			_hud.popup("걷어냈다!", GOLD)
 			_hitstop(0.08)
 			if is_instance_valid(_opponent) and _phase == Phase.FIGHT:
-				_opponent.open_critical(2.2)
+				_opponent.open_critical(2.2 + _player.mod("crit_time"))
 			if _step_id() == "bind":
 				_practice_success()
 		"lost":
@@ -689,6 +773,8 @@ func _load_progress() -> void:
 		_stage = clampi(int(cfg.get_value("progress", "stage", 0)), 0, Campaign.count() - 1)
 		_rank = int(cfg.get_value("progress", "rank", Campaign.START_RANK))
 		_ending = String(cfg.get_value("progress", "ending", ""))
+		_flags = cfg.get_value("progress", "flags", {})
+		_boons = cfg.get_value("progress", "boons", [])
 		for bus in _volumes:
 			_volumes[bus] = float(cfg.get_value("volume", bus, _volumes[bus]))
 
@@ -700,6 +786,8 @@ func _save_progress() -> void:
 	cfg.set_value("progress", "stage", _stage)
 	cfg.set_value("progress", "rank", _rank)
 	cfg.set_value("progress", "ending", _ending)
+	cfg.set_value("progress", "flags", _flags)
+	cfg.set_value("progress", "boons", _boons)
 	for bus in _volumes:
 		cfg.set_value("volume", bus, _volumes[bus])
 	cfg.save(SAVE_PATH)

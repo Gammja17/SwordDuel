@@ -61,7 +61,7 @@ const STAGES := [
 		"fighter": {"hp": 260.0, "armor": 5.5, "windup": 0.50, "attack": 0.24, "recover": 0.5, "stagger": 0.5,
 			"lines": ["a", "b", "c", "lunge"], "combo": 0.4, "parry": 0.5, "riposte": 0.5, "punish": 0.6,
 			"damage": 0.9, "flinch_speed": 15.0, "bind_press": 0.6, "bind_strength": 1.0, "guard_track": 10.0,
-			"speed": 2.4, "outfit": "", "tabard": Color(0.10, 0.10, 0.28), "crest": true,
+			"speed": 2.4, "outfit": "", "tabard": Color(0.10, 0.10, 0.28), "crest": true, "yields": true,
 			# At half health the plate breaks off: lighter, faster, and it never stops.
 			"phase2_at": 0.5, "phase2": {"armor": 1.5, "windup": 0.34, "attack": 0.17, "recover": 0.38,
 				"stagger": 0.45, "speed": 3.4, "combo": 0.6, "feint": 0.3, "damage": 1.0, "flinch_speed": 10.0,

@@ -135,6 +135,7 @@ var active := false  # main turns this on when the duel starts
 var practice := false  # in the practice bout, hits are shown but cost no health
 var alive := true
 var hp := 100.0
+var mods := {}   # the owned boons' effects added up (boons.gd)
 var hurt_flash := 0.0
 var posture := 0.0
 var breath := BREATH_MAX
@@ -298,7 +299,7 @@ func parry_success(h: float) -> void:
 ## We only BLOCKED a cut (held the line, didn't swing into it). Fills the guard meter;
 ## returns true if that broke the guard.
 func absorb_block(h: float) -> bool:
-	if _add_posture(BLOCK_POSTURE, h):
+	if _add_posture(BLOCK_POSTURE * (1.0 + mod("block_posture")), h):
 		return true
 	deflect(Vector2(h * 0.45, 0.25), 0.25)    # knocked open, but still in the fight
 	return false
@@ -359,7 +360,12 @@ func wants_disengage() -> bool:
 
 
 func is_invulnerable() -> bool:
-	return _special != "" or (_dodge_t >= DODGE_IFRAMES.x and _dodge_t <= DODGE_IFRAMES.y)
+	return _special != "" or (_dodge_t >= DODGE_IFRAMES.x and _dodge_t <= DODGE_IFRAMES.y + mod("dodge_i"))
+
+
+## A boon's effect (boons.gd); 0 if there is none.
+func mod(key: String) -> float:
+	return float(mods.get(key, 0.0))
 
 
 func is_guarding() -> bool:
@@ -393,9 +399,9 @@ func parry_landed() -> void:
 
 ## The parry window is tighter against better fighters (their tier's parry_window).
 func is_parry_window() -> bool:
-	var window := PARRY_WINDOW
+	var window := PARRY_WINDOW + mod("parry_window")
 	if target != null and target.has_method("tier_value"):
-		window = float(target.tier_value("parry_window", PARRY_WINDOW))
+		window = float(target.tier_value("parry_window", PARRY_WINDOW)) + mod("parry_window")
 	return _parry_t >= 0.0 and _parry_t <= window
 
 
@@ -564,7 +570,7 @@ func _update_breath(delta: float) -> void:
 		_since_swing += delta
 	_swinging = swinging
 	if _since_swing > BREATH_REGEN_DELAY:
-		breath = minf(breath + BREATH_REGEN * delta, BREATH_MAX)
+		breath = minf(breath + BREATH_REGEN * (1.0 + mod("breath")) * delta, BREATH_MAX)
 
 
 ## How heavy the sword feels: 1 when rested, down to 0.5 when out of breath; guarding

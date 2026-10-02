@@ -12,6 +12,7 @@ extends CharacterBody3D
 ## cuts, presses into a bind, or punishes the player for stepping into range.
 
 signal died
+signal yielded   # a fighter that yields (tier "yields") went down on its knees instead of dying
 signal phase_changed   # it was hurt enough to change (its tier's "phase2")
 signal attack_whiffed   # a cut ended without landing (dodged, fell short)
 
@@ -88,6 +89,7 @@ var _crit_until := -1.0     # (clock) open to a critical thrust until then
 var _recoil := 0.0          # 1 just after a blow landed: the torso snaps away from it
 var _recoil_side := 1.0
 var _phase2 := false
+var _yielded := false
 var _wobble := 0.0          # 1 right after being parried: the body sways, settling
 
 # Blade state read by combat.gd, world space: the edge runs from base (front of the
@@ -234,7 +236,10 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 	if not is_attacking() and _state != State.BIND:
 		_push = global_transform.basis.z * (0.8 + strength * 0.12)
 	if hp <= 0.0:
-		_die()
+		if bool(_t.get("yields", false)) and not _yielded:
+			_yield()
+		else:
+			_die()
 		return
 	_check_phase()
 	# A short flinch from a strong cut if it wasn't mid-attack; not again right away,
@@ -699,8 +704,15 @@ func critical_open() -> bool:
 
 
 ## Nearly beaten and reeling: the player can grab it and finish it (E).
+## The player's boon that lets them execute from further up (boons.gd).
+func _execute_bonus() -> float:
+	if _player != null and _player.has_method("mod"):
+		return _player.mod("execute")
+	return 0.0
+
+
 func can_be_executed() -> bool:
-	return _state != State.DEAD and _state != State.HELD and hp <= max_hp * EXECUTE_BELOW \
+	return _state != State.DEAD and _state != State.HELD and hp <= max_hp * (EXECUTE_BELOW + _execute_bonus()) \
 		and (_state == State.STAGGER or critical_open())
 
 
@@ -752,6 +764,31 @@ func _die(on_knees := false) -> void:
 	_body.collapse(on_knees)
 	Sfx.play("block", global_position + Vector3(0, 0.3, 0), -2.0)
 	died.emit()
+
+
+## Beaten, but not dead: it drops its sword and kneels. The player decides what happens.
+func _yield() -> void:
+	_yielded = true
+	_state = State.DEAD
+	_dodge_vel = Vector3.ZERO
+	collision_layer = 0
+	_body.collapse(true, false)
+	Sfx.play("block", global_position + Vector3(0, 0.3, 0), -2.0)
+	yielded.emit()
+
+
+func is_yielded() -> bool:
+	return _yielded
+
+
+## The blow that ends a kneeling fighter.
+func finish() -> void:
+	var chest := chest_point()
+	Fx.cut_spray(get_tree().current_scene, chest, global_transform.basis.z, 2.4)
+	Sfx.play("cut", chest, 3.0)
+	Sfx.play("hurt", chest, 0.0)
+	_body.flash()
+	_body.fall()
 
 
 func _horizontal_dist(p: Vector3) -> float:
