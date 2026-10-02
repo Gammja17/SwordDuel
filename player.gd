@@ -92,10 +92,10 @@ const SPECIAL_CLOSE := {"thrust": 1.15, "execute": 0.8}   # where the step in st
 # speed are capped. It keeps up with the hand, but a hard swing carries on a little
 # past where the mouse stopped and can't reverse at once.
 const AIM_STIFFNESS := 600.0
-const AIM_DAMPING := 38.0
+const AIM_DAMPING := 46.0
 const AIM_MAX_ACCEL := 170.0
-const AIM_MAX_SPEED := 14.0
-const WHIP := 0.035  # a fast drag flings the point ahead of the hands, this far per m/s
+const AIM_MAX_SPEED := 10.0
+const WHIP := 0.012  # a fast drag flings the point ahead of the hands, this far per m/s
 
 # Breath: every full swing costs some. Out of breath, the sword feels heavy (slower to
 # accelerate, lower top speed, so weaker cuts) until you stop swinging for a moment.
@@ -154,6 +154,10 @@ var _deflect_timer := 0.0   # after a clash the blade bounces and control is dam
 var _deflect_damp := 1.0    # ... to this share of the mouse
 var _guard_goal := Vector2.ZERO
 var _guard_pull := 0.0
+var _guard_blend := 0.0     # 0 blade where the mouse holds it .. 1 in the guard stance
+var _guard_recoil := 0.0    # 1 just after a block: the hands are shoved back
+var _parry_swing := 0.0     # +-1 while the parry snap plays (its direction), else 0
+var _parry_p := 1.0         # progress of that snap, 0..1
 var _flick := Vector2.ZERO
 var _recent := Vector2.ZERO   # the mouse's recent heading, for a left-click cut
 var _prev_target := AIM_REST
@@ -294,6 +298,8 @@ func deflect(kick: Vector2, duration: float = 0.12, damp: float = 0.6) -> void:
 
 ## We parried: the blade snaps across and rings out, then is ours again almost at once.
 func parry_success(h: float) -> void:
+	_parry_swing = h
+	_parry_p = 0.0
 	_aim = _clamp_aim(_aim + Vector2(h * 0.55, 0.30))
 	_aim_vel = Vector2(h * 2.2, 0.8)
 	_abort_cut()
@@ -308,6 +314,7 @@ func parry_success(h: float) -> void:
 func absorb_block(h: float) -> bool:
 	if _add_posture(BLOCK_POSTURE * (1.0 + mod("block_posture")), h):
 		return true
+	_guard_recoil = 1.0
 	deflect(Vector2(h * 0.45, 0.25), 0.25)    # knocked open, but still in the fight
 	return false
 
@@ -534,6 +541,9 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_update_breath(delta)
+	_guard_blend = move_toward(_guard_blend, 1.0 if _guard_held and not in_bind else 0.0, delta * 9.0)
+	_guard_recoil = maxf(_guard_recoil - delta * 5.0, 0.0)
+	_parry_p = minf(_parry_p + delta / 0.16, 1.0)
 	_guard_pull = 0.0
 	if _guard_held and not in_bind:
 		_track_incoming_blade()
@@ -628,7 +638,17 @@ func _held_pose() -> Array:
 	var grip := _within_reach(HANDS_REST + off + Vector3(0.0, 0.0, 0.5 * off.length_squared()))
 	var whip := (Vector3(_aim_vel.x, _aim_vel.y, 0.0) * WHIP).limit_length(0.9)
 	var aim_pt := Vector3(_aim.x, _aim.y, AIM_PLANE_Z) + whip
-	return [grip, (aim_pt - grip).normalized()]
+	var dir := (aim_pt - grip).normalized()
+	if _guard_blend > 0.001 or _parry_p < 1.0:
+		var side := signf(_guard_goal.x) if absf(_guard_goal.x) > 0.05 else 1.0
+		# The stance: hands in front of the chest, blade upright and leaning toward the
+		# side the attack comes from. A block shoves the hands back; a parry snaps across.
+		var g_grip := Vector3(0.05, 1.33, -0.46 + 0.12 * _guard_recoil)
+		var snap := sin(PI * _parry_p) * _parry_swing if _parry_p < 1.0 else 0.0
+		var g_dir := Vector3(side * 0.42 + snap * 1.1, 0.9 - 0.4 * absf(snap), -0.4 - 0.2 * absf(snap)).normalized()
+		grip = grip.lerp(g_grip, _guard_blend)
+		dir = dir.slerp(g_dir, _guard_blend).normalized()
+	return [grip, dir]
 
 
 ## The hands can't go further from the right shoulder than the arms reach.
@@ -1013,6 +1033,7 @@ func _update_camera(delta: float, moving: float) -> void:
 	# The view leans into a fast drag of the blade.
 	sway_yaw += clampf(-_aim_vel.x * 0.006, -0.07, 0.07)
 	sway_pitch += clampf(_aim_vel.y * 0.004, -0.05, 0.05)
+	sway_pitch -= 0.06 * _guard_recoil
 	roll += clampf(_aim_vel.x * 0.004, -0.05, 0.05)
 	if _dodge_t >= 0.0:
 		# Rolling: down toward the ground, tucked (looking down) and tipped the way it
