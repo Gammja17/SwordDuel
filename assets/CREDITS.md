@@ -78,6 +78,15 @@ also marked CC0. The Vehicle pack's readme says "Distributed under Creative Comm
 the sounds are organic recordings, unprocessed apart from normalization. The scrape recordings are a sword
 blade sliding along a knife blade, both steel.
 
+## Music (`music/`, MP3, unmodified apart from the names)
+
+| File | Original asset | Author | Source | License |
+|---|---|---|---|---|
+| `duel.mp3` | Medieval: Battle (`battle_8.mp3`) | RandomMind | https://opengameart.org/content/medieval-battle | CC0 |
+| `calm.mp3` | Medieval: The Old Tower Inn (`The_Old_Tower_Inn.mp3`) | RandomMind | https://opengameart.org/content/medieval-the-old-tower-inn | CC0 |
+| `lament.mp3` | Fantasy: Lament for a Warrior's Soul (`Lament_for_a_Warriors_Soul.mp3`) | RandomMind | https://opengameart.org/content/fantasy-lament-for-a-warriors-soul | CC0 |
+| `victory.mp3` | Medieval: Victory Theme (`victory.mp3`) | RandomMind | https://opengameart.org/content/medieval-victory-theme | CC0 |
+
 ## 3D props (`props/`, glTF 2.0 with 1K JPG textures, OpenGL normal maps)
 
 Each folder holds the `.gltf`, its `.bin` and a `textures/` folder, exactly as Poly Haven ships the 1K glTF

@@ -11,17 +11,19 @@ var _pool2d: Array[AudioStreamPlayer] = []
 var _next3d := 0
 var _next2d := 0
 var _ambience: AudioStreamPlayer
+var _music: AudioStreamPlayer
+var _music_name := ""
 
 
 ## Volume channels, each 0..1 (linear). Effects and the wind ambience have their own
 ## buses under Master so the settings panel can set them separately.
-const BUSES := ["Master", "SFX", "Ambience"]
-const DEFAULT_VOLUME := {"Master": 0.5, "SFX": 0.8, "Ambience": 0.5}
+const BUSES := ["Master", "SFX", "Ambience", "Music"]
+const DEFAULT_VOLUME := {"Master": 0.5, "SFX": 0.8, "Ambience": 0.5, "Music": 0.5}
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	for bus in ["SFX", "Ambience"]:
+	for bus in ["SFX", "Ambience", "Music"]:
 		if AudioServer.get_bus_index(bus) == -1:
 			AudioServer.add_bus()
 			var idx := AudioServer.bus_count - 1
@@ -42,6 +44,33 @@ func _ready() -> void:
 		q.bus = "SFX"
 		add_child(q)
 		_pool2d.append(q)
+
+
+## The background music: one track at a time, crossfaded. Tracks live in assets/music/<name>.mp3.
+## `looping` false plays it once (a victory sting).
+func play_music(track: String, looping := true) -> void:
+	if track == _music_name:
+		return
+	_music_name = track
+	var path := "res://assets/music/%s.mp3" % track
+	var old := _music
+	if old != null:
+		var fade := create_tween().set_ignore_time_scale(true)
+		fade.tween_property(old, "volume_db", -40.0, 1.2)
+		fade.tween_callback(old.queue_free)
+	if track == "" or not ResourceLoader.exists(path):
+		_music = null
+		return
+	var stream := load(path) as AudioStreamMP3
+	stream.loop = looping
+	var p := AudioStreamPlayer.new()
+	p.stream = stream
+	p.bus = "Music"
+	p.volume_db = -40.0
+	add_child(p)
+	p.play()
+	create_tween().set_ignore_time_scale(true).tween_property(p, "volume_db", -4.0, 1.2)
+	_music = p
 
 
 func set_volume(bus: String, linear: float) -> void:

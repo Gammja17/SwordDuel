@@ -484,7 +484,7 @@ func _build_settings() -> void:
 	title.add_theme_font_override("font", _title_font())
 	box.add_child(title)
 
-	for row in [["Master", "전체 소리"], ["SFX", "효과음"], ["Ambience", "바람 소리"]]:
+	for row in [["Master", "전체 소리"], ["Music", "음악"], ["SFX", "효과음"], ["Ambience", "바람 소리"]]:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 14)
 		var name_label := Label.new()

@@ -62,6 +62,7 @@ var _boon_next := 0
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
 var _torch_scale := 1.0
+var _scene_music := "calm"
 var _prefs := {"quality": 1 if OS.has_feature("web") else 2, "difficulty": 1, "sens": 1.0, "text": 1.0, "fullscreen": false}
 var _war := false             # the courtyard is burning
 var _war_nodes: Array[Node] = []
@@ -88,7 +89,7 @@ var _rebind_at := 0
 var _visibility_cb: JavaScriptObject
 var _menu_open := false
 var _captured_at := 0
-var _volumes := {"Master": 0.5, "SFX": 0.8, "Ambience": 0.5}
+var _volumes := {"Master": 0.5, "SFX": 0.8, "Ambience": 0.5, "Music": 0.5}
 
 
 func _ready() -> void:
@@ -389,7 +390,8 @@ func _final() -> void:
 func _credits() -> void:
 	_phase = Phase.CREDITS
 	_hud.show_card("제작", "진검승부",
-		"게임 디자인과 프로그래밍  gamuza, Claude\n\n캐릭터와 동작  Quaternius, KayKit (CC0)\n배경 재질과 소품  Poly Haven, ambientCG (CC0)\n효과음  StarNinjas, Kenney, artisticdude, Fantozzi 외 (CC0)\n글꼴  나눔명조 (SIL OFL)\n\n자세한 출처는 assets/CREDITS.md",
+		"게임 디자인과 프로그래밍  gamuza, Claude\n\n캐릭터와 동작  Quaternius, KayKit (CC0)\n배경 재질과 소품  Poly Haven, ambientCG (CC0)\n음악  RandomMind (CC0)
+효과음  StarNinjas, Kenney, artisticdude, Fantozzi 외 (CC0)\n글꼴  나눔명조 (SIL OFL)\n\n자세한 출처는 assets/CREDITS.md",
 		"클릭하면 처음 화면으로 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 500
 	_set_fps()
@@ -459,6 +461,7 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 		return
 	var id: String = ids.pop_front()
 	_phase = Phase.SCENE
+	_scene_music = "lament" if id in ["war_bell", "war_mujin", "baldor_pre", "end_execute", "end_spare"] else "calm"
 	_clear_duel()
 	_title_cam.current = true
 	_hud.hide_card()
@@ -838,6 +841,28 @@ func _set_fps() -> void:
 	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE
 	Engine.max_fps = 60 if fighting else 30
 	_hud.show_settings_button(not fighting and not _menu_open)
+	_update_music()
+
+
+## What plays under each part of the game (assets/music): calm for the school, the duel
+## theme in a fight, the lament for the war and the end, a short sting for a win.
+func _update_music() -> void:
+	match _phase:
+		Phase.FIGHT:
+			Sfx.play_music("duel")
+		Phase.OUTCOME:
+			if _stats.get("won", false):
+				Sfx.play_music("victory", false)
+			else:
+				Sfx.play_music("calm")
+		Phase.SCENE:
+			Sfx.play_music(_scene_music)
+		Phase.INTRO:
+			Sfx.play_music("lament" if _war else "calm")
+		Phase.CHOICE, Phase.FINAL, Phase.CREDITS:
+			Sfx.play_music("lament")
+		_:
+			Sfx.play_music("calm")
 
 
 func _capture_mouse() -> void:
