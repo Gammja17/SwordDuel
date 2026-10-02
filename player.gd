@@ -59,18 +59,18 @@ const FACE_RATE := 20.0   # how quickly the body swings round to the target when
 # body steps in. Right-click pulls out of it (a feint).
 const FLICK := 0.3
 const FLICK_DECAY := 12.0
-const CUT_DRAW := 0.13
-const CUT_HANG := 0.04     # a beat at the top of the draw before it lets go
-const CUT_SWING := 0.15
-const CUT_HOLD := 0.1
-const CUT_RETURN := 0.22
+const CUT_DRAW := 0.18
+const CUT_HANG := 0.09     # a beat at the top of the draw before it lets go
+const CUT_SWING := 0.19
+const CUT_HOLD := 0.16
+const CUT_RETURN := 0.32
 const CUT_FROM := -125.0
 const CUT_TO := 105.0
 const CUT_OVER := 14.0     # the follow-through carries this much further and springs back
 const CUT_PIVOT := Vector3(0.05, 1.32, -0.1)   # between the shoulders, a little forward
 const CUT_TWIST := 0.42    # how far the shoulders and view turn each way (rad)
-const CUT_STEP := 3.0      # step into the cut (m/s at its start, fading)
-const CUT_GAP := 0.45      # a new cut can start this soon after one returns
+const CUT_STEP := 3.8      # step into the cut (m/s at its start, fading)
+const CUT_GAP := 0.6      # a new cut can start this soon after one returns
 # After a cut, bringing the mouse back toward the middle is not a cut: for RECOVER_TIME
 # seconds a flick against the way the last cut went has to be RECOVER_MULT times as hard.
 const RECOVER_TIME := 1.6
@@ -758,11 +758,12 @@ func _cut_pose(delta: float, held: Array) -> Array:
 			_cut_whoosh = true
 			Sfx.play_flat("swing", 3.0)
 			sword.set("_swing_cd", 0.5)   # this one whoosh, not the blade's own as well
-			add_trauma(0.1)
+			add_trauma(0.22)
+			_punch = Vector2(0.0, -0.035)   # the whole body leans into it
 		# Heavy to start, then faster and faster right through the far side: a lash,
 		# not an even circle.
 		var p := (t - CUT_DRAW - CUT_HANG) / CUT_SWING
-		var q := pow(p, 2.2)
+		var q := pow(p, 2.6)
 		var deg := lerpf(CUT_FROM, CUT_TO, q)
 		out = _arc(deg)
 		_cut_twist = sin(deg_to_rad(deg))
@@ -1011,7 +1012,7 @@ func _update_camera(delta: float, moving: float) -> void:
 	var sway_pitch := (_aim.y - AIM_REST.y) * deg_to_rad(10.0 if _aim.y > AIM_REST.y else 20.0)
 	sway_yaw += -_cut_side.x * CUT_TWIST * _cut_twist
 	sway_pitch += _cut_side.y * 0.2 * _cut_twist
-	_cam.fov = 74.0 + 12.0 * _cut_kick
+	_cam.fov = 74.0 + 16.0 * _cut_kick
 	# A blow that landed jolts the view along it.
 	sway_yaw -= _punch.x
 	sway_pitch += _punch.y
