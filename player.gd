@@ -61,7 +61,7 @@ const FLICK := 0.3
 const FLICK_DECAY := 12.0
 const CUT_DRAW := 0.18
 const CUT_HANG := 0.09     # a beat at the top of the draw before it lets go
-const CUT_SWING := 0.19
+const CUT_SWING := 0.27
 const CUT_HOLD := 0.16
 const CUT_RETURN := 0.32
 const CUT_FROM := -125.0
@@ -763,7 +763,7 @@ func _cut_pose(delta: float, held: Array) -> Array:
 		# Heavy to start, then faster and faster right through the far side: a lash,
 		# not an even circle.
 		var p := (t - CUT_DRAW - CUT_HANG) / CUT_SWING
-		var q := pow(p, 2.6)
+		var q := pow(p, 2.0)
 		var deg := lerpf(CUT_FROM, CUT_TO, q)
 		out = _arc(deg)
 		_cut_twist = sin(deg_to_rad(deg))
