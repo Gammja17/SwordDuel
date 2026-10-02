@@ -28,6 +28,8 @@ const POSES := {
 	# "lunge": a thrust. Drawn back to the right hip, then driven straight out.
 	"wind_lunge": [Vector3(0.22, -0.12, 0.18), Vector3(-0.08, 0.7, -0.7), Vector3(0.0, 1.0, 0.0), -0.4, -0.1],
 	"end_lunge": [Vector3(0.03, 0.0, -0.46), Vector3(0.0, 0.06, -1.0), Vector3(0.0, 1.0, 0.0), 0.15, 0.30],
+	# Standing easy (cutscenes): the sword held low at the side, point to the ground.
+	"relaxed": [Vector3(0.30, -0.66, -0.04), Vector3(0.12, -1.0, -0.12), Vector3(0.0, 0.0, -1.0), 0.0, 0.0],
 	# Knocked aside (stagger, lost bind): the blade flung out to the right.
 	"thrown": [Vector3(0.28, -0.18, -0.10), Vector3(0.85, 0.45, -0.25), Vector3(0.0, 1.0, 0.0), -0.25, -0.12],
 }

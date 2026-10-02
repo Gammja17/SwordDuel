@@ -18,10 +18,10 @@ func _init(parent: Node3D, upper: float, fore: float, sleeve: Material, plate: M
 		glove: Material, shadows := true) -> void:
 	upper_len = upper
 	fore_len = fore
-	_upper = Armor.part(parent, Armor.capsule(0.056, upper + 0.10), sleeve)
-	_fore = Armor.part(parent, Armor.capsule(0.049, fore + 0.06), plate)
-	_elbow = Armor.part(parent, Armor.sphere(0.064), plate)
-	_hand = Armor.part(parent, Armor.box(Vector3(0.085, 0.075, 0.105)), glove)
+	_upper = Armor.part(parent, Armor.capsule(0.040, upper + 0.08), sleeve)
+	_fore = Armor.part(parent, Armor.capsule(0.034, fore + 0.05), plate)
+	_elbow = Armor.part(parent, Armor.sphere(0.042), sleeve)
+	_hand = Armor.part(parent, Armor.box(Vector3(0.062, 0.055, 0.085)), glove)
 	if not shadows:
 		for mi in [_upper, _fore, _elbow, _hand]:
 			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

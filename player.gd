@@ -29,13 +29,13 @@ const EYE := Vector3(0.0, 1.62, 0.0)
 # far as the arms reach, belt to face), bending in toward the chest at the edges. At
 # rest the hilt sits at the bottom right of the view and the blade rises toward the
 # opponent; the blade always points on out to where the mouse aims.
-const HANDS_REST := Vector3(0.14, 1.26, -0.5)
+const HANDS_REST := Vector3(0.15, 1.27, -0.58)
 const HANDS_SPAN := Vector2(0.42, 0.5)   # hand travel per metre of aim
-const HANDS_REACH := 0.62                # at most this far from the right shoulder
+const HANDS_REACH := 0.66                # at most this far from the right shoulder
 const SHOULDER_R := Vector3(0.19, 1.40, 0.02)
 const SHOULDER_L := Vector3(-0.19, 1.40, 0.02)
-const UPPER_ARM := 0.33
-const FOREARM := 0.31
+const UPPER_ARM := 0.34
+const FOREARM := 0.32
 
 # The blade's point is steered across a plane this far in front of the chest (far
 # enough that a low aim still reaches forward rather than straight down).
@@ -215,8 +215,8 @@ func _ready() -> void:
 	_cam.current = true
 
 	# Our own arms: mail sleeves, plate forearms, gauntlets.
-	_arm_r = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.mail(), Armor.steel(), Armor.dark_steel(), false)
-	_arm_l = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.mail(), Armor.steel(), Armor.dark_steel(), false)
+	_arm_r = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.cloth(Color(0.20, 0.17, 0.14)), Armor.leather(), Armor.leather(), false)
+	_arm_l = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.cloth(Color(0.20, 0.17, 0.14)), Armor.leather(), Armor.leather(), false)
 
 	sword = SwordScript.new()
 	sword.name = "Sword"

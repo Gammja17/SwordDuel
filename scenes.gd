@@ -78,9 +78,9 @@ static func _line_beat(who: String, other: String, text: String) -> Dictionary:
 		return {"cam": {"pos": Vector3(0.0, 1.6, 5.0), "look": Vector3(0.0, 1.3, 0.0), "fov": 55.0,
 			"drift": Vector3(0.0, 0.0, -0.12)}, "clip": {"rian": "", other: ""}, "line": ["", text]}
 	var listener := "rian" if who == other else other
-	var cam_z := 2.9 if listener == "rian" else -2.9
-	var cam_x := 0.7 if listener == "rian" else -0.7
-	return {"cam": {"pos": Vector3(cam_x, 1.65, cam_z), "look": who, "fov": 42.0},
+	var cam_z := 3.9 if listener == "rian" else -3.9
+	var cam_x := 1.0 if listener == "rian" else -1.0
+	return {"cam": {"pos": Vector3(cam_x, 1.65, cam_z), "look": who, "fov": 36.0},
 		"clip": {who: "Idle_Talking_Loop", listener: ""}, "line": [NAMES[who], text]}
 
 

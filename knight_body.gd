@@ -181,7 +181,7 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 		for hy in [0.03, 0.005]:
 			Armor.part(head, Armor.box(Vector3(0.008, 0.008, 0.02)), Armor.visor_black(), Vector3(hx, hy, 0.126))
 	if crest:
-		Armor.part(head, Armor.box(Vector3(0.03, 0.10, 0.26)), Armor.cloth(Color(0.85, 0.66, 0.22)), Vector3(0, 0.31, -0.02))
+		Armor.part(head, Armor.box(Vector3(0.018, 0.06, 0.24)), Armor.cloth(Color(0.55, 0.12, 0.10)), Vector3(0, 0.255, -0.02))
 
 	# Torso: breastplate under a cloth coat, a belt, and a skirt of plates below.
 	var chest := _attach("Chest")

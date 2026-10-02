@@ -197,7 +197,8 @@ func _add_actor(id: String, spec: Dictionary) -> void:
 	add_child(body)
 	body.build(spec.get("tabard", Color()), spec.get("crest", false), spec.get("outfit", "squire"))
 	body.position = spec.get("at", Vector3.ZERO)
-	var a := {"body": body, "goal": null, "clip": "", "clip_t": 0.0, "pose": spec.get("pose", "open")}
+	body._two_hands = 0.0   # the left hand hangs free
+	var a := {"body": body, "goal": null, "clip": "", "clip_t": 0.0, "pose": spec.get("pose", "relaxed")}
 	_actors[id] = a
 
 
@@ -266,7 +267,7 @@ func _aim_camera() -> void:
 		return
 	var p := _point_of(_look)
 	if _look is String:
-		p.y += 1.45   # the head, not the feet
+		p.y += 0.95   # below the head, so the figure sits in the upper part of the frame
 	if _cam.global_position.distance_to(p) > 0.05:
 		_cam.look_at(p, Vector3.UP)
 
@@ -284,28 +285,28 @@ func _build_ui() -> void:
 	_layer.add_child(_fade)
 	_panel = PanelContainer.new()
 	_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_panel.offset_left = 120.0
-	_panel.offset_right = -120.0
-	_panel.offset_top = -190.0
-	_panel.offset_bottom = -40.0
+	_panel.offset_left = 220.0
+	_panel.offset_right = -220.0
+	_panel.offset_top = -138.0
+	_panel.offset_bottom = -26.0
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.04, 0.035, 0.03, 0.82)
 	sb.border_color = Color(0.98, 0.82, 0.35, 0.7)
 	sb.set_border_width_all(2)
-	sb.set_content_margin_all(18)
+	sb.set_content_margin_all(12)
 	_panel.add_theme_stylebox_override("panel", sb)
 	_layer.add_child(_panel)
 	var box := VBoxContainer.new()
 	_panel.add_child(box)
 	_name = Label.new()
 	_name.add_theme_font_override("font", load(FONT_TITLE))
-	_name.add_theme_font_size_override("font_size", 26)
+	_name.add_theme_font_size_override("font_size", 22)
 	_name.add_theme_color_override("font_color", Color(0.98, 0.82, 0.35))
 	box.add_child(_name)
 	_text = Label.new()
 	_text.add_theme_font_override("font", load(FONT_BODY))
-	_text.add_theme_font_size_override("font_size", 26)
+	_text.add_theme_font_size_override("font_size", 23)
 	_text.add_theme_color_override("font_color", Color(0.97, 0.95, 0.88))
 	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
