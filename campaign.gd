@@ -50,19 +50,23 @@ const STAGES := [
 		"about": "북방군 병사입니다. 갑옷이 단단해 얕게 베어서는 통하지 않습니다.",
 		"fighter": {"hp": 90.0, "armor": 3.5, "lines": ["a", "b", "c"], "feint": 0.1, "outfit": "",
 			"tabard": Color(0.12, 0.14, 0.30)},
-		"rank": [0, 0], "pre": ["war_bell"], "post": []},
+		"rank": [0, 0], "pre": ["war_bell"], "post": [], "war": true},
 	{"kicker": "전쟁 · 연무장", "name": "북방 정예병",
 		"about": "정예병입니다. 빠른 연속 베기와 찌르기를 섞습니다.",
 		"fighter": {"hp": 105.0, "armor": 4.0, "windup": 0.40, "attack": 0.20, "lines": ["a", "b", "c", "lunge"],
 			"combo": 0.35, "parry": 0.4, "speed": 2.8, "outfit": "", "tabard": Color(0.12, 0.14, 0.30), "crest": true},
-		"rank": [0, 0], "pre": ["war_mujin"], "post": []},
+		"rank": [0, 0], "pre": ["war_mujin"], "post": [], "war": true},
 	{"kicker": "졸업시험 · 적장", "name": "북방 적장 발도르",
 		"about": "중장갑을 두른 노장입니다. 갑옷이 두꺼워 쳐내기와 힘싸움으로 흔들어야 합니다. 칼이 무겁고 느립니다.",
 		"fighter": {"hp": 260.0, "armor": 5.5, "windup": 0.50, "attack": 0.24, "recover": 0.5, "stagger": 0.5,
 			"lines": ["a", "b", "c", "lunge"], "combo": 0.4, "parry": 0.5, "riposte": 0.5, "punish": 0.6,
 			"damage": 0.9, "flinch_speed": 15.0, "bind_press": 0.6, "bind_strength": 1.0, "guard_track": 10.0,
-			"speed": 2.4, "outfit": "", "tabard": Color(0.10, 0.10, 0.28), "crest": true},
-		"rank": [0, 0], "pre": ["baldor_pre"], "post": []},
+			"speed": 2.4, "outfit": "", "tabard": Color(0.10, 0.10, 0.28), "crest": true,
+			# At half health the plate breaks off: lighter, faster, and it never stops.
+			"phase2_at": 0.5, "phase2": {"armor": 1.5, "windup": 0.34, "attack": 0.17, "recover": 0.38,
+				"stagger": 0.45, "speed": 3.4, "combo": 0.6, "feint": 0.3, "damage": 1.0, "flinch_speed": 10.0,
+				"poise": Vector2(0.3, 0.8)}},
+		"rank": [0, 0], "pre": ["baldor_pre"], "post": [], "war": true},
 ]
 
 

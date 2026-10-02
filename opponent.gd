@@ -12,6 +12,7 @@ extends CharacterBody3D
 ## cuts, presses into a bind, or punishes the player for stepping into range.
 
 signal died
+signal phase_changed   # it was hurt enough to change (its tier's "phase2")
 signal attack_whiffed   # a cut ended without landing (dodged, fell short)
 
 enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD, DODGE, HELD }
@@ -86,6 +87,7 @@ var _returning := false
 var _crit_until := -1.0     # (clock) open to a critical thrust until then
 var _recoil := 0.0          # 1 just after a blow landed: the torso snaps away from it
 var _recoil_side := 1.0
+var _phase2 := false
 var _wobble := 0.0          # 1 right after being parried: the body sways, settling
 
 # Blade state read by combat.gd, world space: the edge runs from base (front of the
@@ -234,6 +236,7 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 	if hp <= 0.0:
 		_die()
 		return
+	_check_phase()
 	# A short flinch from a strong cut if it wasn't mid-attack; not again right away,
 	# so no stun-lock, and light blows don't stop it at all.
 	if strength >= float(_t.get("flinch_speed", 7.0)) and not is_attacking() \
@@ -242,6 +245,23 @@ func receive_cut(strength: float, pos: Vector3, swing_dir: Vector3) -> void:
 		_state = State.STAGGER
 		_timer = 0.35
 		_body.act("Hit_Chest", 0.0, _body.clip_length("Hit_Chest"), 0.35, 0.05)
+
+
+## Some fighters change when hurt enough: new numbers, and the plate breaks off. It is
+## left reeling for a moment.
+func _check_phase() -> void:
+	if _phase2 or not _t.has("phase2") or hp > max_hp * float(_t.get("phase2_at", 0.5)):
+		return
+	_phase2 = true
+	_t = _t.duplicate()
+	_t.merge(_t["phase2"], true)
+	_in_combo = false
+	_enter(State.STAGGER)
+	_timer = 1.0
+	_body.shed_armor()
+	Sfx.play("block", global_position + Vector3(0.0, 1.2, 0.0), 4.0)
+	Sfx.play("clash", global_position + Vector3(0.0, 1.2, 0.0), 0.0)
+	phase_changed.emit()
 
 
 ## Our blade met the player's.

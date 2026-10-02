@@ -54,6 +54,10 @@ var _stage := 0               # the next duel to fight (saved)
 var _rank := Campaign.START_RANK   # the standing in the school (saved)
 var _entrance_seen := false
 var _ending := ""
+var _war := false             # the courtyard is burning
+var _war_nodes: Array[Node] = []
+var _sun: DirectionalLight3D
+var _env: Environment
 var _player: CharacterBody3D
 var _opponent: CharacterBody3D
 var _combat: Node
@@ -202,6 +206,7 @@ func _advance() -> void:
 
 func _to_title() -> void:
 	_phase = Phase.TITLE
+	_set_war(false)
 	_clear_duel()
 	# A knight waiting in the courtyard while the camera circles.
 	_opponent = OpponentScript.new()
@@ -301,6 +306,7 @@ func _choice() -> void:
 
 func _choose(ending: String) -> void:
 	_ending = ending
+	_set_war(false)   # the graduation is held once the fire is out
 	_save_progress()
 	_run_scenes(["end_" + ending], _final)
 
@@ -329,6 +335,7 @@ func _reset_campaign() -> void:
 ## Cutscenes before the duel, then the duel's card.
 func _begin_stage(i: int) -> void:
 	_tier = i
+	_set_war(bool(Campaign.STAGES[i].get("war", false)))
 	_run_scenes(Campaign.STAGES[i]["pre"].duplicate(), _intro.bind(i))
 
 
@@ -403,6 +410,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.lock_changed.connect(_on_lock_changed)
 	_player.died.connect(_on_player_died)
 	_opponent.died.connect(_on_opponent_died)
+	_opponent.phase_changed.connect(_on_boss_phase)
 	_opponent.attack_whiffed.connect(_on_attack_whiffed)
 
 
@@ -531,6 +539,15 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 		_:
 			_hud.popup("챙!", Color(0.95, 0.95, 0.92))
 			_hitstop(0.04)
+
+
+## The boss was hurt enough: its plate breaks off and it comes on harder.
+func _on_boss_phase() -> void:
+	_hud.popup("갑옷이 부서졌다!", RED)
+	_hitstop(0.15)
+	_slowmo(0.3, 0.6)
+	if is_instance_valid(_player):
+		_player.add_trauma(0.7)
 
 
 func _on_cut(strength: float, _pos: Vector3) -> void:
@@ -834,6 +851,7 @@ func _build_world() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 30.0
 	add_child(sun)
+	_sun = sun
 
 	var env := Environment.new()
 	var sky := Sky.new()
@@ -864,6 +882,57 @@ func _build_world() -> void:
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
+	_env = env
+
+
+## The northern army is in the courtyard: a dark red sky, smoke, big fires on the walls and
+## embers drifting up. Off again for the graduation and the title.
+func _set_war(on: bool) -> void:
+	if on == _war:
+		return
+	_war = on
+	for n in _war_nodes:
+		if is_instance_valid(n):
+			if n is OmniLight3D:
+				_torches.erase(n)
+			n.queue_free()
+	_war_nodes.clear()
+	_sun.light_color = Color(1.0, 0.42, 0.22) if on else Color(1.0, 0.80, 0.60)
+	_sun.light_energy = 0.7 if on else 1.25
+	_env.fog_light_color = Color(0.30, 0.15, 0.11) if on else Color(0.62, 0.55, 0.50)
+	_env.fog_density = 0.024 if on else 0.008
+	_env.ambient_light_energy = 0.6 if on else 1.1
+	_env.background_energy_multiplier = 0.45 if on else 1.0
+	if not on:
+		return
+	for at in [Vector3(-7.3, 0.0, -7.3), Vector3(7.3, 0.0, -7.3), Vector3(-7.3, 0.0, 7.3), Vector3(7.3, 0.0, 7.3),
+			Vector3(0.0, 0.0, -7.3), Vector3(-7.3, 0.0, 0.0), Vector3(7.3, 0.0, 0.0)]:
+		_war_nodes.append(_torch_fire(at + Vector3(0.0, 0.4, 0.0), 2.6))
+		_war_nodes.append(_torches.back())
+	var embers := CPUParticles3D.new()
+	embers.amount = 90
+	embers.lifetime = 4.0
+	embers.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	embers.emission_box_extents = Vector3(7.5, 0.2, 7.5)
+	embers.direction = Vector3.UP
+	embers.spread = 20.0
+	embers.initial_velocity_min = 0.6
+	embers.initial_velocity_max = 1.6
+	embers.gravity = Vector3(0.3, 0.2, 0.0)
+	var dot := SphereMesh.new()
+	dot.radius = 0.015
+	dot.height = 0.03
+	dot.radial_segments = 4
+	dot.rings = 2
+	embers.mesh = dot
+	var em := StandardMaterial3D.new()
+	em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	em.albedo_color = Color(1.0, 0.55, 0.15)
+	embers.material_override = em
+	embers.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	embers.position = Vector3(0.0, 0.2, 0.0)
+	add_child(embers)
+	_war_nodes.append(embers)
 
 
 ## Photoscanned CC0 props from Poly Haven (assets/props, see CREDITS.md).
@@ -939,7 +1008,7 @@ func _torch(pos: Vector3) -> void:
 
 
 ## Flickering flame particles and a warm light. size scales both (a fire pit is bigger).
-func _torch_fire(at: Vector3, size: float) -> void:
+func _torch_fire(at: Vector3, size: float) -> Node3D:
 	var flame := CPUParticles3D.new()
 	flame.amount = int(24 * size)
 	flame.lifetime = 0.6
@@ -979,6 +1048,7 @@ func _torch_fire(at: Vector3, size: float) -> void:
 	light.position = at + Vector3(0.0, 0.17 * size, 0.0)
 	add_child(light)
 	_torches.append(light)
+	return flame
 
 
 func _weapon_rack(pos: Vector3, yaw: float) -> void:

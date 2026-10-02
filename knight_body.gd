@@ -108,6 +108,7 @@ var skeleton: Skeleton3D
 var sword: Node3D
 var _model: Node3D
 var _steel: StandardMaterial3D
+var _plates: Array[Node3D] = []   # the breast and shoulder plate, which can come off
 var _flash_mats: Array[BaseMaterial3D] = []   # lit up red when a blow lands
 var _flash := 0.0
 var _action_weight := 0.0
@@ -186,6 +187,7 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 	var chest := _attach("Chest")
 	var plate := Armor.part(chest, Armor.lathe(PackedVector2Array(CUIRASS), 28), _steel, Vector3(0, -1.174, 0))
 	plate.scale = Vector3(1.0, 1.0, 0.74)
+	_plates.append(plate)
 	var coat := Armor.part(chest, Armor.lathe(PackedVector2Array(COAT), 28), cloth, Vector3(0, -1.174, 0))
 	coat.scale = Vector3(1.04, 1.0, 0.8)
 	var hips := _attach("Hips")
@@ -193,12 +195,14 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 	for f in FAULDS:
 		var band := Armor.part(hips, Armor.lathe(PackedVector2Array(f), 24), _steel, Vector3(0, -0.917, 0))
 		band.scale = Vector3(1.0, 1.0, 0.82)
+		_plates.append(band)
 
 	# Arms: pauldrons, vambraces, gauntlets. Leg plates, knees and sabatons.
 	for side in ["Left", "Right"]:
 		var upper := _attach(side + "UpperArm")
 		var pauldron := Armor.part(upper, Armor.sphere(0.118), _steel, Vector3(0, 0.03, 0))
 		pauldron.scale = Vector3(1.1, 1.05, 1.1)
+		_plates.append(pauldron)
 		_limb(side + "LowerArm", side + "Hand", 0.046, _steel)
 		var hand := _attach(side + "Hand")
 		Armor.part(hand, Armor.box(Vector3(0.085, 0.11, 0.06)), dark, Vector3(0, 0.05, 0.005))
@@ -569,6 +573,13 @@ func update_body(delta: float) -> void:
 			m.emission_enabled = _flash > 0.0
 			m.emission = Color(0.9, 0.12, 0.05)
 			m.emission_energy_multiplier = _flash * 1.6
+
+
+## The plate breaks off: breastplate, skirt and pauldrons vanish, leaving the mail.
+func shed_armor() -> void:
+	for n in _plates:
+		n.visible = false
+	_flash = 1.0
 
 
 func flash() -> void:
