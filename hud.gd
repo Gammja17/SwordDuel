@@ -3,6 +3,8 @@ extends CanvasLayer
 signal settings_requested            # the gear button on the cards
 signal settings_closed(to_title: bool)
 signal volume_changed(bus: String, value: float)
+signal pref_changed(key: String, value: float)   # quality, difficulty (index), sens, text (share), fullscreen
+signal reset_requested
 ## Everything drawn on screen: the opponent's name and health (top), our health and
 ## guard (bottom), popups for parries/blocks, one-line hints, a hurt vignette, and the
 ## full-screen cards used for the title, duel intros and results.
@@ -42,6 +44,10 @@ var _settings_button: Button
 var _resume_button: Button
 var _title_button: Button
 var _sliders := {}
+var _pref_controls := {}
+var _reset_button: Button
+var _reset_armed := false
+var _status: Label
 
 const BAR_W := 420.0
 
@@ -124,6 +130,7 @@ func _ready() -> void:
 	_build_task_panel()
 	_build_card()
 	_build_settings()
+	_build_status()
 
 	_fade = ColorRect.new()
 	_fade.color = Color(0, 0, 0, 0)
@@ -139,6 +146,7 @@ func _ready() -> void:
 func show_fight_ui(on: bool, show_enemy := true) -> void:
 	_enemy_box.visible = on and show_enemy
 	_player_box.visible = on
+	_status.visible = on and _status.text != ""
 
 
 ## Bind contest: balance -1 (losing) .. +1 (winning); push_dir is the way the player
@@ -180,10 +188,16 @@ func show_settings_button(on: bool) -> void:
 
 
 ## in_game: opened from a fight (Resume / back-to-title) rather than from a card.
-func show_settings(volumes: Dictionary, in_game: bool) -> void:
+func show_settings(volumes: Dictionary, in_game: bool, prefs := {}) -> void:
 	for bus in _sliders:
-		(_sliders[bus] as HSlider).set_value_no_signal(float(volumes.get(bus, 1.0)) * 100.0)
+		(_sliders[bus] as HSlider).set_value_no_signal(float(volumes.get(bus, prefs.get(bus, 1.0))) * 100.0)
 		_update_pct(bus)
+	for key in ["quality", "difficulty"]:
+		(_pref_controls[key] as OptionButton).select(int(prefs.get(key, 1)))
+	if _pref_controls.has("fullscreen"):
+		(_pref_controls["fullscreen"] as CheckButton).set_pressed_no_signal(bool(prefs.get("fullscreen", false)))
+	_reset_armed = false
+	_reset_button.text = "저장 지우기"
 	_resume_button.text = "계속하기" if in_game else "닫기"
 	_title_button.visible = in_game
 	_settings.visible = true
@@ -460,7 +474,7 @@ func _build_settings() -> void:
 	panel.custom_minimum_size = Vector2(520, 0)
 	_settings.add_child(panel)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 18)
+	box.add_theme_constant_override("separation", 10)
 	panel.add_child(box)
 
 	var title := Label.new()
@@ -496,6 +510,54 @@ func _build_settings() -> void:
 		box.add_child(line)
 		_sliders[bus] = slider
 
+	for row in [["quality", "그래픽", ["낮음", "보통", "높음"]], ["difficulty", "난이도", ["쉬움", "보통", "어려움"]]]:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 14)
+		var name_label := Label.new()
+		name_label.text = row[1]
+		name_label.custom_minimum_size = Vector2(110, 0)
+		line.add_child(name_label)
+		var ob := OptionButton.new()
+		for item in row[2]:
+			ob.add_item(item)
+		ob.custom_minimum_size = Vector2(160, 36)
+		var key: String = row[0]
+		ob.item_selected.connect(func(i: int): pref_changed.emit(key, float(i)))
+		line.add_child(ob)
+		box.add_child(line)
+		_pref_controls[key] = ob
+	for row in [["sens", "마우스 감도", 30, 200], ["text", "대사 속도", 50, 300]]:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 14)
+		var name_label := Label.new()
+		name_label.text = row[1]
+		name_label.custom_minimum_size = Vector2(110, 0)
+		line.add_child(name_label)
+		var slider := HSlider.new()
+		slider.min_value = row[2]
+		slider.max_value = row[3]
+		slider.step = 5
+		slider.custom_minimum_size = Vector2(260, 28)
+		slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var key: String = row[0]
+		slider.value_changed.connect(func(v: float):
+			_update_pct(key)
+			pref_changed.emit(key, v / 100.0))
+		line.add_child(slider)
+		var pct := Label.new()
+		pct.name = "Pct"
+		pct.custom_minimum_size = Vector2(56, 0)
+		pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		line.add_child(pct)
+		box.add_child(line)
+		_sliders[key] = slider
+	if not OS.has_feature("web"):
+		var full := CheckButton.new()
+		full.text = "전체 화면"
+		full.toggled.connect(func(on: bool): pref_changed.emit("fullscreen", 1.0 if on else 0.0))
+		box.add_child(full)
+		_pref_controls["fullscreen"] = full
+
 	var hint := Label.new()
 	hint.text = "싸우는 중에는 ESC로 이 창을 엽니다"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -517,9 +579,36 @@ func _build_settings() -> void:
 	_title_button.custom_minimum_size = Vector2(150, 44)
 	_title_button.pressed.connect(func(): settings_closed.emit(true))
 	buttons.add_child(_title_button)
+	_reset_button = Button.new()
+	_reset_button.text = "저장 지우기"
+	_reset_button.custom_minimum_size = Vector2(150, 44)
+	_reset_button.pressed.connect(func():
+		if _reset_armed:
+			_reset_armed = false
+			_reset_button.text = "저장 지우기"
+			reset_requested.emit()
+		else:
+			_reset_armed = true
+			_reset_button.text = "정말? 한 번 더")
+	buttons.add_child(_reset_button)
 
 	_root.add_child(_settings)
 	_settings.visible = false
+
+
+func _build_status() -> void:
+	_status = Label.new()
+	_status.position = Vector2(24, 20)
+	_status.add_theme_font_size_override("font_size", 18)
+	_status.add_theme_color_override("font_color", Color(0.9, 0.85, 0.7))
+	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status.visible = false
+	_root.add_child(_status)
+
+
+## The standing and the learned techniques, small in the corner of a fight.
+func set_status(text: String) -> void:
+	_status.text = text
 
 
 func _update_pct(bus: String) -> void:

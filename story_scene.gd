@@ -38,6 +38,7 @@ var _has_line := false
 var _speed := WALK_SPEED
 var _drift := Vector3.ZERO
 var _look: Variant = null    # where the camera looks: a point, or an actor id
+var speed := 1.0              # the text speed setting
 var _done := false
 var flags := {}              # choices made in scenes (main.gd keeps and saves it)
 var _choice := {}            # the choice beat waiting for 1 / 2, if any
@@ -108,7 +109,7 @@ func _process(delta: float) -> void:
 		_update_actor(id, delta)
 	_update_camera(delta)
 	if _has_line:
-		_text.visible_characters = mini(int(_t * TYPE_SPEED), _text.text.length())
+		_text.visible_characters = mini(int(_t * TYPE_SPEED * speed), _text.text.length())
 	elif _t >= _dur:
 		_next()
 

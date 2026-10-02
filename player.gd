@@ -135,6 +135,7 @@ var active := false  # main turns this on when the duel starts
 var practice := false  # in the practice bout, hits are shown but cost no health
 var alive := true
 var hp := 100.0
+var sens := 1.0   # the mouse sensitivity setting
 var mods := {}   # the owned boons' effects added up (boons.gd)
 var hurt_flash := 0.0
 var posture := 0.0
@@ -226,7 +227,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := event as InputEventMouseMotion
 		if in_bind:
-			_bind_push += mm.relative.x * AIM_SENS   # sideways pressure on the locked blades
+			_bind_push += mm.relative.x * AIM_SENS * sens   # sideways pressure on the locked blades
 			return
 		steer(mm.relative)
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
@@ -259,8 +260,8 @@ func _input(event: InputEvent) -> void:
 ## would carry it past the edge of its range turns the body or tilts the view instead.
 func steer(relative: Vector2) -> void:
 	var damp := _deflect_damp if _deflect_timer > 0.0 else 1.0
-	var nx := _aim_target.x + relative.x * AIM_SENS * damp
-	var ny := _aim_target.y - relative.y * AIM_SENS * damp
+	var nx := _aim_target.x + relative.x * AIM_SENS * sens * damp
+	var ny := _aim_target.y - relative.y * AIM_SENS * sens * damp
 	if not locked:
 		rotate_y(-(nx - clampf(nx, AIM_MIN.x, AIM_MAX.x)) * EDGE_TURN)
 		_free_pitch = clampf(_free_pitch + (ny - clampf(ny, AIM_MIN.y, AIM_MAX.y)) * EDGE_TURN, -FREE_PITCH, FREE_PITCH)

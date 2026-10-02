@@ -88,6 +88,7 @@ var _returning := false
 var _crit_until := -1.0     # (clock) open to a critical thrust until then
 var _recoil := 0.0          # 1 just after a blow landed: the torso snaps away from it
 var _recoil_side := 1.0
+var dmg_mult := 1.0   # the difficulty setting
 var _phase2 := false
 var _yielded := false
 var _wobble := 0.0          # 1 right after being parried: the body sways, settling
@@ -194,7 +195,7 @@ func land_cut(target: Node, point: Vector3) -> void:
 	# Its cuts are always fast; cap the speed so each tier's "damage" really sets how
 	# many hits the player can take (roughly 6 / 5 / 4 from first to last).
 	var speed := minf(blade_tip_vel.length(), 14.0)
-	target.receive_cut(speed * float(_t.get("damage", 1.0)), point, blade_tip_vel.normalized())
+	target.receive_cut(speed * float(_t.get("damage", 1.0)) * dmg_mult, point, blade_tip_vel.normalized())
 
 
 ## combat.gd, first thing each frame: where the animated sword is now.

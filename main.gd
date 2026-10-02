@@ -18,7 +18,7 @@ const Scenes := preload("res://scenes.gd")
 const StoryScene := preload("res://story_scene.gd")
 const Boons := preload("res://boons.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -59,6 +59,10 @@ var _flags := {}              # choices made in cutscenes (saved)
 var _boons: Array = []        # ids of the learned techniques (saved)
 var _boon_offer: Array = []
 var _boon_next := 0
+var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
+var _rain: Node
+var _torch_scale := 1.0
+var _prefs := {"quality": 1 if OS.has_feature("web") else 2, "difficulty": 1, "sens": 1.0, "text": 1.0, "fullscreen": false}
 var _war := false             # the courtyard is burning
 var _war_nodes: Array[Node] = []
 var _sun: DirectionalLight3D
@@ -96,6 +100,8 @@ func _ready() -> void:
 	_hud.settings_requested.connect(func(): _open_menu(false))
 	_hud.settings_closed.connect(_close_menu)
 	_hud.volume_changed.connect(_on_volume_changed)
+	_hud.pref_changed.connect(_on_pref_changed)
+	_hud.reset_requested.connect(_on_reset_requested)
 	for bus in _volumes:
 		Sfx.set_volume(bus, _volumes[bus])
 	_title_cam = Camera3D.new()
@@ -103,6 +109,7 @@ func _ready() -> void:
 	add_child(_title_cam)
 	Sfx.start_ambience("wind_loop", -12.0)
 	_setup_web()
+	_apply_prefs()
 	_totals = _new_stats()
 	_to_title()
 
@@ -118,7 +125,7 @@ func _process(delta: float) -> void:
 		Engine.time_scale = 1.0
 
 	for i in _torches.size():
-		_torches[i].light_energy = 1.3 + sin(Time.get_ticks_msec() * 0.011 + i * 1.7) * 0.12 + randf_range(-0.08, 0.08)
+		_torches[i].light_energy = _torch_scale * (1.3 + sin(Time.get_ticks_msec() * 0.011 + i * 1.7) * 0.12 + randf_range(-0.08, 0.08))
 
 	match _phase:
 		Phase.TITLE:
@@ -216,6 +223,8 @@ func _advance() -> void:
 			else:
 				_intro(_tier)
 		Phase.FINAL:
+			_credits()
+		Phase.CREDITS:
 			_reset_campaign()
 			_to_title()
 
@@ -247,14 +256,22 @@ func _to_title() -> void:
 func _intro(tier: int) -> void:
 	_tier = tier
 	_phase = Phase.INTRO
-	_spawn_duel(Campaign.tier(tier))
-	_player.mods = Boons.mods_of(_boons)
 	var t: Dictionary = Campaign.tier(tier)
+	var d := _difficulty()
+	t["hp"] = float(t["hp"]) * float(d["hp"])
+	_spawn_duel(t)
+	_opponent.dmg_mult = float(d["dmg"])
+	_player.mods = _player_mods(tier)
+	_hud.set_status(_status_text())
+	var place: Dictionary = Campaign.place_of(tier)
+	var about: String = t["about"] + "\n\n" + place["name"]
+	if place["note"] != "":
+		about += "  ·  " + place["note"]
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_hud.show_fight_ui(false)
 	_hud.clear_hint()
 	_hud.clear_task()
-	_hud.show_card(t["kicker"], t["name"], t["about"], "클릭하면 겨룹니다")
+	_hud.show_card(t["kicker"], t["name"], about, "클릭하면 겨룹니다")
 	_click_ready_at = Time.get_ticks_msec() + 400
 	_set_fps()
 
@@ -358,8 +375,23 @@ func _final() -> void:
 	_hud.show_fight_ui(false)
 	var what := "복수를 마치고 영웅이 되었습니다. 공훈 제도는 그대로 남았습니다." if _ending == "execute" \
 		else "진실을 밝혔습니다. 귀족 의회가 흔들리고, 공훈 제도는 폐지되기 시작했습니다."
-	_hud.show_card("졸업", "수석 졸업", what + "\n\n" + _stats_line(_totals), "클릭하면 처음 화면으로 돌아갑니다")
+	var doyun := "곁에 남았습니다" if int(_flags.get("doyun_trust", 0)) == 0 else "후원 가문으로 돌아갔습니다"
+	var serafin := "함께 북문을 지켰습니다" if int(_flags.get("serafin_gate", 0)) == 0 else "가문과 함께 학교를 떠났습니다"
+	var text := what + "\n\n최종 석차 %d위\n도윤: %s\n세라핀: %s" % [_rank, doyun, serafin]
+	if not _boons.is_empty():
+		text += "\n익힌 기예: " + _boon_names()
+	text += "\n\n" + _stats_line(_totals)
+	_hud.show_card("졸업", "수석 졸업", text, "클릭하면 계속됩니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
+	_set_fps()
+
+
+func _credits() -> void:
+	_phase = Phase.CREDITS
+	_hud.show_card("제작", "진검승부",
+		"게임 디자인과 프로그래밍  gamuza, Claude\n\n캐릭터와 동작  Quaternius, KayKit (CC0)\n배경 재질과 소품  Poly Haven, ambientCG (CC0)\n효과음  StarNinjas, Kenney, artisticdude, Fantozzi 외 (CC0)\n글꼴  나눔명조 (SIL OFL)\n\n자세한 출처는 assets/CREDITS.md",
+		"클릭하면 처음 화면으로 돌아갑니다")
+	_click_ready_at = Time.get_ticks_msec() + 500
 	_set_fps()
 
 
@@ -415,6 +447,7 @@ func _reset_campaign() -> void:
 ## Cutscenes before the duel, then the duel's card.
 func _begin_stage(i: int) -> void:
 	_tier = i
+	_set_place(Campaign.STAGES[i].get("place", "dusk"))
 	_set_war(bool(Campaign.STAGES[i].get("war", false)))
 	_run_scenes(Campaign.STAGES[i]["pre"].duplicate(), _intro.bind(i))
 
@@ -435,6 +468,7 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 	_hud.hide_bind()
 	var s := StoryScene.new()
 	s.flags = _flags
+	s.speed = float(_prefs["text"])
 	add_child(s)
 	s.finished.connect(func():
 		_title_cam.current = true
@@ -467,6 +501,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.name = "Player"
 	add_child(_player)
 	_player.position = Vector3(0.0, 0.0, 2.0)
+	_player.sens = float(_prefs["sens"])
 
 	_opponent = OpponentScript.new()
 	_opponent.name = "Opponent"
@@ -775,6 +810,8 @@ func _load_progress() -> void:
 		_ending = String(cfg.get_value("progress", "ending", ""))
 		_flags = cfg.get_value("progress", "flags", {})
 		_boons = cfg.get_value("progress", "boons", [])
+		for k in _prefs:
+			_prefs[k] = cfg.get_value("prefs", k, _prefs[k])
 		for bus in _volumes:
 			_volumes[bus] = float(cfg.get_value("volume", bus, _volumes[bus]))
 
@@ -788,6 +825,8 @@ func _save_progress() -> void:
 	cfg.set_value("progress", "ending", _ending)
 	cfg.set_value("progress", "flags", _flags)
 	cfg.set_value("progress", "boons", _boons)
+	for k in _prefs:
+		cfg.set_value("prefs", k, _prefs[k])
 	for bus in _volumes:
 		cfg.set_value("volume", bus, _volumes[bus])
 	cfg.save(SAVE_PATH)
@@ -814,7 +853,7 @@ func _open_menu(in_game: bool) -> void:
 	if in_game:
 		get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_hud.show_settings(_volumes, in_game)
+	_hud.show_settings(_volumes, in_game, _prefs)
 
 
 func _close_menu(to_title: bool) -> void:
@@ -833,6 +872,124 @@ func _close_menu(to_title: bool) -> void:
 func _on_volume_changed(bus: String, value: float) -> void:
 	_volumes[bus] = value
 	Sfx.set_volume(bus, value)
+
+
+# --- preferences, quality, places -------------------------------------------------------------
+
+func _apply_prefs() -> void:
+	_apply_quality()
+	if not OS.has_feature("web"):
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if bool(_prefs["fullscreen"]) \
+			else DisplayServer.WINDOW_MODE_WINDOWED)
+	if is_instance_valid(_player):
+		_player.sens = float(_prefs["sens"])
+
+
+## 0 low (no shadows, no anti-aliasing), 1 medium (soft edges, shadows), 2 high.
+func _apply_quality() -> void:
+	var q := int(_prefs["quality"])
+	var vp := get_viewport()
+	vp.msaa_3d = Viewport.MSAA_2X if q >= 2 else Viewport.MSAA_DISABLED
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 1 else Viewport.SCREEN_SPACE_AA_DISABLED
+	_sun.shadow_enabled = q >= 1
+	_sun.directional_shadow_max_distance = 20.0 if q == 1 else 30.0
+	_env.glow_enabled = q >= 2
+	# The fires and the rain depend on it.
+	if _war:
+		_war = false
+		_set_war(true)
+	_apply_place(_war_or_place())
+
+
+func _on_pref_changed(key: String, value: float) -> void:
+	match key:
+		"quality", "difficulty":
+			_prefs[key] = int(value)
+		"fullscreen":
+			_prefs[key] = value > 0.5
+		_:
+			_prefs[key] = value
+	_apply_prefs()
+	_save_progress()
+
+
+## Wipe the save: back to day one.
+func _on_reset_requested() -> void:
+	_practice_done = false
+	_entrance_seen = false
+	_reset_campaign()
+	_close_menu(true)
+
+
+func _difficulty() -> Dictionary:
+	return [{"hp": 0.8, "dmg": 0.75}, {"hp": 1.0, "dmg": 1.0}, {"hp": 1.2, "dmg": 1.25}][int(_prefs["difficulty"])]
+
+
+func _war_or_place() -> String:
+	return "war" if _war else _place
+
+
+func _set_place(name: String) -> void:
+	_place = name
+	_apply_place(_war_or_place())
+
+
+func _apply_place(name: String) -> void:
+	var p: Dictionary = Campaign.PLACES[name]
+	_sun.light_color = p["sun"]
+	_sun.light_energy = p["sun_e"]
+	_env.fog_light_color = p["fog"]
+	_env.fog_density = p["fog_d"]
+	_env.ambient_light_energy = p["amb"]
+	_env.background_energy_multiplier = p["bg"]
+	_torch_scale = float(p["torch"])
+	if is_instance_valid(_rain):
+		_rain.queue_free()
+		_rain = null
+	if p.get("rain", false):
+		_make_rain()
+
+
+func _make_rain() -> void:
+	var rain := CPUParticles3D.new()
+	rain.amount = [120, 260, 420][int(_prefs["quality"])]
+	rain.lifetime = 0.7
+	rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	rain.emission_box_extents = Vector3(9.0, 0.2, 9.0)
+	rain.direction = Vector3.DOWN
+	rain.spread = 2.0
+	rain.initial_velocity_min = 13.0
+	rain.initial_velocity_max = 15.0
+	rain.gravity = Vector3.ZERO
+	rain.particle_flag_align_y = true
+	var streak := BoxMesh.new()
+	streak.size = Vector3(0.008, 0.45, 0.008)
+	rain.mesh = streak
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0.75, 0.82, 0.95, 0.55)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rain.material_override = m
+	rain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	rain.position = Vector3(0.0, 9.0, 0.0)
+	add_child(rain)
+	_rain = rain
+
+
+## The player's effects for this duel: boons plus what the weather does to them.
+func _player_mods(stage: int) -> Dictionary:
+	var m := Boons.mods_of(_boons)
+	var pm: Dictionary = Campaign.place_of(stage).get("mods", {})
+	for k in pm:
+		m[k] = float(m.get(k, 0.0)) + float(pm[k])
+	return m
+
+
+func _status_text() -> String:
+	var s := "석차 %d위" % _rank
+	if not _boons.is_empty():
+		s += "   ·   " + _boon_names()
+	return s
 
 
 ## In the browser: stop everything while the tab is hidden, and keep the 3D resolution
@@ -985,20 +1142,16 @@ func _set_war(on: bool) -> void:
 				_torches.erase(n)
 			n.queue_free()
 	_war_nodes.clear()
-	_sun.light_color = Color(1.0, 0.42, 0.22) if on else Color(1.0, 0.80, 0.60)
-	_sun.light_energy = 0.7 if on else 1.25
-	_env.fog_light_color = Color(0.30, 0.15, 0.11) if on else Color(0.62, 0.55, 0.50)
-	_env.fog_density = 0.024 if on else 0.008
-	_env.ambient_light_energy = 0.6 if on else 1.1
-	_env.background_energy_multiplier = 0.45 if on else 1.0
+	_apply_place("war" if on else _place)
 	if not on:
 		return
-	for at in [Vector3(-7.3, 0.0, -7.3), Vector3(7.3, 0.0, -7.3), Vector3(-7.3, 0.0, 7.3), Vector3(7.3, 0.0, 7.3),
-			Vector3(0.0, 0.0, -7.3), Vector3(-7.3, 0.0, 0.0), Vector3(7.3, 0.0, 0.0)]:
+	var spots := [Vector3(-7.3, 0.0, -7.3), Vector3(7.3, 0.0, -7.3), Vector3(-7.3, 0.0, 7.3), Vector3(7.3, 0.0, 7.3),
+			Vector3(0.0, 0.0, -7.3), Vector3(-7.3, 0.0, 0.0), Vector3(7.3, 0.0, 0.0)]
+	for at in spots.slice(0, [3, 5, 7][int(_prefs["quality"])]):
 		_war_nodes.append(_torch_fire(at + Vector3(0.0, 0.4, 0.0), 2.6))
 		_war_nodes.append(_torches.back())
 	var embers := CPUParticles3D.new()
-	embers.amount = 90
+	embers.amount = [30, 60, 90][int(_prefs["quality"])]
 	embers.lifetime = 4.0
 	embers.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 	embers.emission_box_extents = Vector3(7.5, 0.2, 7.5)
