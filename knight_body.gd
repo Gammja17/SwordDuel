@@ -562,6 +562,14 @@ func act(clip: String, from: float, to: float, duration: float, fade := 0.1) -> 
 	_action_fade = 1.0 / maxf(fade, 0.01)
 
 
+## Standing at ease: the free left hand hangs open instead of reaching for the sword's grip
+## (the sword is held low in the right hand), and the body is held still.
+func at_ease() -> void:
+	_two_hands = 0.0
+	_grip_hands.open_left = true
+	stand_still()
+
+
 ## Stand still: the idle clip held on its first frame (feet together, arms down), not moving.
 func stand_still() -> void:
 	act("Idle", 0.0, 0.0, 1.0, 0.15)
