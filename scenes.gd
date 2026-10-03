@@ -261,6 +261,13 @@ static func get_scene(id: String, flags := {}) -> Dictionary:
 				["baldor", "……그랬나. 네 아비는 항복했었다. 내가 받으려 했지."],
 				["rian", "거짓말."],
 				["baldor", "칼에게 물어보아라. 칼은 거짓을 말하지 못한다."]])
+		"exam_open":
+			return duo("mujin", [
+				["", "학기가 세 번 지났다. 학교 게시판에 석차 시험 공고가 붙었다."],
+				["mujin", "석차 시험이다. 상대는 정해져 있지 않다. 올라오는 순서대로 겨룬다."],
+				["rian", "한 번 지면요?"],
+				["mujin", "거기서 끝이다. 이긴 만큼 석차가 오르고, 오른 석차는 누구도 뺏지 못한다."],
+				["mujin", "기억해라. 시험은 너를 재는 것이 아니라, 학교가 너를 부르는 이름을 정하는 것이다."]])
 		"end_execute":
 			return _ending("execute", flags)
 		"end_spare":

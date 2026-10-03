@@ -78,6 +78,8 @@ var _hub_spots: Array = []
 var _hub_near := {}
 var _used_rivals: Array = []   # rivals already met this term
 var _door_options: Array = []
+var _term_kind := "term"      # "term", "exam" (every third term) or "war"
+var _term_cleared := false
 var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
@@ -282,6 +284,8 @@ func _advance() -> void:
 				var post: Array = Campaign.stage(_tier)["post"].duplicate()
 				if _tier + 1 < Campaign.count():
 					_run_scenes(post, _reward.bind(_tier + 1))
+				elif String(Campaign.stage(_tier).get("id", "")) != "baldor":
+					_term_clear()
 				elif _ending == "":
 					_choice()
 				else:
@@ -411,7 +415,7 @@ func _on_opponent_died() -> void:
 		_hud.popup("다음!", GOLD)
 		get_tree().create_timer(1.1).timeout.connect(_next_mob)
 		return
-	if _tier + 1 >= Campaign.count():
+	if String(Campaign.stage(_tier).get("id", "")) == "baldor":
 		_ending = "execute"
 	_won()
 
@@ -619,7 +623,7 @@ func _boon_names() -> String:
 ## After a room's reward: the next room. Rivals and the war are fixed points; in between
 ## there are doors to choose from, each with a room behind it and a reward in that room.
 func _next_room() -> void:
-	var opts := Campaign.next_options(Campaign.route.size(), _grade(), _used_rivals)
+	var opts := Campaign.next_options(Campaign.route.size(), _grade(), _used_rivals, _term_kind)
 	if opts.size() == 1:
 		_enter_room(opts[0])
 	else:
@@ -689,6 +693,39 @@ func _reward(next_stage: int) -> void:
 			_boon_pick(next_stage, true)
 		_:
 			_boon_pick(next_stage)
+
+
+# --- 학기, 순위 시험, 학교 석차 ---------------------------------------------------------------
+
+## The kind of term that starts next: an ordinary one (9 rooms, ends at Kaiden), a ranking
+## exam every third term (3 rooms, no second chances), and once two exams are behind you,
+## the war term (12 rooms, the real ending).
+func _next_term_kind() -> String:
+	if _exam_due():
+		return "exam"
+	if int(_meta.get("exams", 0)) >= 2:
+		return "war"
+	return "term"
+
+
+func _exam_due() -> bool:
+	return int(_meta.get("runs_done", 0)) >= 3 * (int(_meta.get("exams", 0)) + 1)
+
+
+func _term_kind_name(kind: String) -> String:
+	return {"exam": "순위 시험", "war": "전쟁 학기", "term": "학기"}[kind]
+
+
+## The term is won without the war: Kaiden's room was the last.
+func _term_clear() -> void:
+	_ending = ""
+	_term_cleared = true
+	_run_end_card()
+
+
+## How the school ranks you has moved: a permanent mark of growth.
+func _school_rank() -> int:
+	return int(_meta.get("school_rank", Campaign.START_RANK))
 
 
 # --- 유파, 길, 수련, 정예 도전 -----------------------------------------------------------------
@@ -801,7 +838,7 @@ func _to_hub() -> void:
 		_set_war(false)
 		_set_place("dusk")
 		_build_hub()
-		_hud.hint("%s   ·   WASD 이동 · E 로 말을 걸거나 고릅니다" % Campaign.grade_name(int(_meta.get("total", 0))), 6.0)
+		_hud.hint("%s   ·   학교 석차 %d위   ·   WASD 이동 · E 상호작용%s" % [Campaign.grade_name(int(_meta.get("total", 0))), _school_rank(), "   ·   순위 시험이 기다립니다" if _exam_due() else ""], 7.0)
 	_hub_player.enabled = true
 	_hub_player.cam.current = true
 	_capture_mouse()
@@ -836,8 +873,8 @@ func _build_hub() -> void:
 	_hub_nodes.append(_hub_label("훈련장", board_at + Vector3(0.0, 1.7, 0.08), 40))
 	_hub_spots.append({"id": "board", "pos": board_at, "r": 2.2, "prompt": "훈련장을 연다"})
 	# The gate.
-	_hub_nodes.append(_hub_label("정문  ·  학기 시작", Vector3(0.0, 3.0, -7.2), 52))
-	_hub_spots.append({"id": "gate", "pos": Vector3(0.0, 0.0, -6.3), "r": 2.6, "prompt": "정문으로 나가 학기를 시작한다"})
+	_hub_nodes.append(_hub_label("정문  ·  " + _term_kind_name(_next_term_kind()) + " 시작", Vector3(0.0, 3.0, -7.2), 52))
+	_hub_spots.append({"id": "gate", "pos": Vector3(0.0, 0.0, -6.3), "r": 2.6, "prompt": "정문으로 나간다  (%s)" % _term_kind_name(_next_term_kind())})
 
 
 func _hub_label(text: String, at: Vector3, size: int) -> Label3D:
@@ -900,18 +937,32 @@ func _hub_interact() -> void:
 			_hub_talk(id)
 
 
+## Talking to someone in the yard. The first thing they say about themselves comes after a
+## few terms, the next after more (their bond with you grows); in between, small talk.
 func _hub_talk(who: String) -> void:
 	_phase = Phase.HUB_TALK
 	var name_: String = Scenes.NAMES.get(who, who)
-	var best := int(_meta.get("best_stage", 0))
-	var pool: Array = []
-	for t in Campaign.HUB_TALKS:
-		if t["who"] == name_ and best >= int(t["min"]) and (not t.has("flag") or int(_flags.get(t["flag"], 0)) == int(t["val"])):
-			pool.append(t)
-	var text := "(눈이 마주쳤지만 딱히 할 말이 없는 듯하다.)"
-	if not pool.is_empty():
-		text = pool[randi() % pool.size()]["text"]
-	_hud.show_card("기숙사 마당", name_, text, "클릭하면 돌아갑니다")
+	var bond: Dictionary = _meta.get("bond", {})
+	var step := int(bond.get(who, 0))
+	var chain: Array = Campaign.HUB_CHAINS.get(who, [])
+	var text := ""
+	var title := name_
+	if step < chain.size() and int(_meta.get("runs_done", 0)) >= int(chain[step]["runs"]) and int(_meta.get("exams", 0)) >= int(chain[step]["exams"]):
+		text = chain[step]["text"]
+		bond[who] = step + 1
+		_meta["bond"] = bond
+		_save_progress()
+		title = "%s   ·   %d/%d" % [name_, step + 1, chain.size()]
+	else:
+		var best := int(_meta.get("best_stage", 0))
+		var pool: Array = []
+		for t in Campaign.HUB_TALKS:
+			if t["who"] == name_ and best >= int(t["min"]) and (not t.has("flag") or int(_flags.get(t["flag"], 0)) == int(t["val"])):
+				pool.append(t)
+		text = "(눈이 마주쳤지만 딱히 할 말이 없는 듯하다.)"
+		if not pool.is_empty():
+			text = pool[randi() % pool.size()]["text"]
+	_hud.show_card("기숙사 마당", title, text, "클릭하면 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
 
@@ -927,11 +978,14 @@ func _pick_hub(i: int) -> void:
 
 
 func _start_run() -> void:
+	_term_kind = _next_term_kind()
+	Campaign.route_len = {"exam": 3, "term": 9, "war": 12}[_term_kind]
+	_term_cleared = false
 	_meta["runs"] = int(_meta.get("runs", 0)) + 1
 	Campaign.route.clear()
 	_used_rivals = []
 	_stage = 0
-	_rank = Campaign.START_RANK
+	_rank = _school_rank()
 	_ending = ""
 	_boons = []
 	_boon_lvls = {}
@@ -940,7 +994,10 @@ func _start_run() -> void:
 	_stats = _new_stats()
 	_totals = _new_stats()
 	_save_progress()
-	_begin_stage(0)   # (no school yet: it is picked first)
+	if _term_kind == "exam":
+		_run_scenes(["exam_open"], _begin_stage.bind(0))
+	else:
+		_begin_stage(0)   # (no school yet: it is picked first)
 
 
 ## A run is over (beaten, or won): points for how far it got, then back to the dormitory.
@@ -950,6 +1007,14 @@ func _run_end_card() -> void:
 	var pts := cleared * 10 + int(_totals.get("parries", 0)) * 2 + int(_totals.get("cuts", 0))
 	if _ending != "":
 		pts += 100
+	if _term_cleared:
+		pts += 40
+	var rank_before := _school_rank()
+	_meta["school_rank"] = mini(rank_before, _rank)
+	_meta["runs_done"] = int(_meta.get("runs_done", 0)) + 1
+	if _term_kind == "exam":
+		_meta["exams"] = int(_meta.get("exams", 0)) + 1
+		pts += cleared * 15
 	var grade_before := _grade()
 	_meta["pts"] = int(_meta.get("pts", 0)) + pts
 	_meta["total"] = int(_meta.get("total", 0)) + pts
@@ -958,11 +1023,17 @@ func _run_end_card() -> void:
 	var body := "이긴 상대 %d명   최종 석차 %d위\n\n수련 점수 +%d   (합계 %d)" % [cleared, _rank, pts, int(_meta["pts"])]
 	if not _boons.is_empty():
 		body += "\n\n익힌 기예: " + _boon_names()
+	if _term_kind == "exam":
+		body += "\n\n순위 시험 %d승   학교 석차 %d위 → %d위" % [cleared, rank_before, _school_rank()]
+	elif _school_rank() < rank_before:
+		body += "\n\n학교 석차 %d위 → %d위" % [rank_before, _school_rank()]
+	if _term_cleared:
+		body += "\n학기를 끝까지 치러 냈습니다."
 	if _grade() > grade_before:
 		body += "\n\n승급!  %s\n%s" % [Campaign.grade_name(int(_meta["total"])), Campaign.GRADE_GIFTS[_grade()]]
 	else:
 		body += "\n\n%s   다음 승급까지 %d점" % [Campaign.grade_name(int(_meta["total"])), maxi(_next_grade_cost(), 0)]
-	_hud.show_card("학기가 끝났습니다", "수련 기록", body, "클릭하면 기숙사로 돌아갑니다")
+	_hud.show_card(("시험이 끝났습니다" if _term_kind == "exam" else "학기가 끝났습니다"), "수련 기록", body, "클릭하면 기숙사로 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
 	_set_fps()
 

@@ -149,6 +149,50 @@ const HUB_TALKS := [
 ]
 
 
+# What each person tells you as you get to know them, in order. A step opens once enough terms
+# (runs) have been finished and enough ranking exams taken; until then they only say the
+# little things in HUB_TALKS. Each talk moves the bond one step.
+const HUB_CHAINS := {
+	"doyun": [
+		{"runs": 0, "exams": 0, "text": "처음엔 누구나 꼴찌에서 시작하네. 자네는 벌써 한 걸음 나아갔군."},
+		{"runs": 2, "exams": 0, "text": "보고서는 이제 쓰지 않네. 쓸 이야기가 없어서가 아니라, 쓰고 싶지 않아서야."},
+		{"runs": 5, "exams": 1, "text": "후원자가 내 승급을 걸고 자네에 대해 묻더군. 나는 '아직 모르겠다'고 답했네."},
+		{"runs": 6, "exams": 2, "text": "북쪽에서 전쟁이 곧이라는 소문이야. 기사단에 나갈 사람은 이미 정해졌다고도 하고."},
+	],
+	"mujin": [
+		{"runs": 0, "exams": 0, "text": "칼 든 모양이 처음보다 낫다. 하지만 숨이 아직 거칠다."},
+		{"runs": 2, "exams": 0, "text": "스무 해 전에 열둘이 입학했다. 이름을 다 기억한다. 한 명씩 말해 줄까."},
+		{"runs": 5, "exams": 1, "text": "선봉대에는 평민이 먼저 간다. 이유는 묻지 마라. 대답은 이미 알고 있겠지."},
+		{"runs": 6, "exams": 2, "text": "시험이 끝나면 사범이 해 줄 일은 없다. ……그래도 곁에 있겠다."},
+	],
+	"taesan": [
+		{"runs": 0, "exams": 0, "text": "한 칸 올랐다고 으스대지 마라. 한 칸이 제일 비싸다고 했잖아."},
+		{"runs": 3, "exams": 0, "text": "내 아비는 선봉으로 갔다. 이름 대신 숫자로 기록됐지. 그래서 나는 숫자가 싫다."},
+		{"runs": 6, "exams": 1, "text": "너한테 지고서 알았다. 이기는 것보다 아까운 게 있다는 걸."},
+	],
+	"leon": [
+		{"runs": 0, "exams": 0, "text": "윗분들 얘기는 못 들었어! 아무것도! 진짜로!"},
+		{"runs": 3, "exams": 0, "text": "우리 집안 영지는 이제 마차 한 대 세금도 못 내. 내가 비굴한 건 그래서야."},
+		{"runs": 6, "exams": 1, "text": "종 치던 밤 말이야. 사실 무서워서 달린 거였어. 근데 달리다 보니 종탑이더라."},
+	],
+	"seohyuk": [
+		{"runs": 0, "exams": 0, "text": "정정당당히. 그것이 아버지께 배운 유일한 것이네."},
+		{"runs": 3, "exams": 0, "text": "아버지는 내 칼에 '충분하다'고 하신 적이 없네. 한 번도."},
+		{"runs": 6, "exams": 1, "text": "자네와 겨루는 날은 아버지의 아들이 아닌 날이네. 그 맛을 알아 버렸어."},
+	],
+	"serafin": [
+		{"runs": 0, "exams": 0, "text": "내 칼에는 시선이 많아. 그래서 더 곧게 서야 해."},
+		{"runs": 3, "exams": 0, "text": "우리 가문의 편지는 북쪽 공작에게 갔어. 읽고도 말하지 못했지."},
+		{"runs": 6, "exams": 1, "text": "시험에서 이기면 내가 집안과 맞설 이유가 하나 더 생겨. 그래서 이기고 싶어."},
+	],
+	"kaiden": [
+		{"runs": 0, "exams": 0, "text": "수석은 내 것이다. ……아직은."},
+		{"runs": 4, "exams": 1, "text": "아버지는 안개 골짜기 이야기를 하지 않으신다. 물으면 화제를 돌리시지."},
+		{"runs": 7, "exams": 2, "text": "그날 아버지가 한 일이 사실이라면, 나는 어디에 서야 하지."},
+	],
+}
+
+
 static func upgrade_cost(u: Dictionary, level: int) -> int:
 	if level >= int(u["max"]):
 		return -1
@@ -160,6 +204,7 @@ static func upgrade_cost(u: Dictionary, level: int) -> int:
 # rooms in between are drawn at random from doors, so no two terms go the same way.
 
 const ROUTE_LENGTH := 12
+static var route_len := 9   # rooms in this term: 9 a term, 3 an exam, 12 the war term
 static var route: Array = []   # the rooms of this term, as they were entered
 
 # Which of STAGES holds each named fighter's room.
@@ -257,30 +302,37 @@ static func rival_room(id: String, rank_to: int) -> Dictionary:
 	var r: Dictionary = (STAGES[RIVAL_INDEX[id]] as Dictionary).duplicate(true)
 	r["id"] = id
 	r["reward"] = "boon"
-	if rank_to > 0:
-		r["rank"] = [0, rank_to]
+	r["rank"] = [0, 0]
+	r["rank_gain"] = rank_to   # places gained in the term's standing for winning here
 	return r
 
 
 ## What the doors out of a cleared room offer. One option means the way is fixed (a rival, the
 ## war); otherwise 2 (3 at the top grade) rooms, each with the reward waiting in it.
 ## `used` holds the rivals already met this term.
-static func next_options(depth: int, grade: int, used: Array) -> Array:
+static func next_options(depth: int, grade: int, used: Array, kind := "term") -> Array:
+	if kind == "exam":
+		# A ranking exam: three rivals one after another, each win worth a lot of places.
+		if depth <= 1:
+			return [{"room": _pick_rival(used, 2)}]
+		return [{"room": rival_room("kaiden", 4)}]
 	match depth:
 		0:
 			return [{"room": mob_room(0, "boon", false, "dusk")}]
 		2:
-			return [{"room": _pick_rival(used, 20)}]
+			return [{"room": _pick_rival(used, 1)}]
 		5:
-			return [{"room": _pick_rival(used, 10)}]
+			return [{"room": _pick_rival(used, 1)}]
 		8:
-			return [{"room": rival_room("kaiden", 1)}]
-		9:
-			return [{"room": rival_room("soldier", 0)}]
-		10:
-			return [{"room": rival_room("elite", 0)}]
-		11:
-			return [{"room": rival_room("baldor", 0)}]
+			return [{"room": rival_room("kaiden", 2)}]
+	if kind == "war":
+		match depth:
+			9:
+				return [{"room": rival_room("soldier", 0)}]
+			10:
+				return [{"room": rival_room("elite", 0)}]
+			11:
+				return [{"room": rival_room("baldor", 0)}]
 	var opts: Array = [
 		{"label": "기예의 문", "room": mob_room(depth, "boon")},
 		{"label": "수련의 문", "room": mob_room(depth, "train")},
@@ -305,7 +357,7 @@ static func stage(i: int) -> Dictionary:
 
 
 static func count() -> int:
-	return ROUTE_LENGTH
+	return route_len
 
 
 ## The full opponent dictionary for a stage: base numbers, then its own, then the card text.
@@ -323,8 +375,7 @@ static func tier(i: int, k := 0) -> Dictionary:
 
 ## The rank you hold after winning stage i.
 static func rank_after_win(i: int, current: int) -> int:
-	var band: Array = stage(i)["rank"]
-	return band[1] if band[1] > 0 else current
+	return maxi(current - int(stage(i).get("rank_gain", 0)), 1)
 
 
 ## The rank after losing stage i: one place down each time, down to four below where the stage started.
