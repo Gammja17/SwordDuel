@@ -18,7 +18,7 @@ const Scenes := preload("res://scenes.gd")
 const StoryScene := preload("res://story_scene.gd")
 const Boons := preload("res://boons.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, CREDITS }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -59,6 +59,7 @@ var _flags := {}              # choices made in cutscenes (saved)
 var _boons: Array = []        # ids of the learned techniques (saved)
 var _boon_offer: Array = []
 var _boon_next := 0
+var _boon_pending := 0
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
 var _torch_scale := 1.0
@@ -179,6 +180,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_take_boon(1)
 		elif bk == KEY_3:
 			_take_boon(2)
+		elif bk == KEY_4:
+			_take_boon(3)
+		return
+	if _phase == Phase.BOON_DROP and event is InputEventKey and event.pressed and not event.is_echo():
+		var dk := (event as InputEventKey).physical_keycode
+		if dk >= KEY_1 and dk <= KEY_5:
+			_drop_boon(dk - KEY_1)
 		return
 	if _phase == Phase.CHOICE and event is InputEventKey and event.pressed and not event.is_echo():
 		var k := (event as InputEventKey).physical_keycode
@@ -399,7 +407,8 @@ func _credits() -> void:
 
 # --- boons (기예) ---------------------------------------------------------------------------
 
-## After a win: three techniques to learn, one is kept. Then on to the next duel.
+## After a win: three techniques to learn, one is kept (or none). Only MAX_SLOTS fit, so
+## a full set means pushing one out. Then on to the next duel.
 func _boon_pick(next_stage: int) -> void:
 	_boon_offer = Boons.roll(_boons)
 	if _boon_offer.is_empty():
@@ -411,17 +420,60 @@ func _boon_pick(next_stage: int) -> void:
 	_title_cam.current = true
 	_hud.show_fight_ui(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var body := ""
-	for i in _boon_offer.size():
-		var b: Dictionary = _boon_offer[i]
-		body += "%d  %s\n     %s\n\n" % [i + 1, b["name"], b["text"]]
-	_hud.show_card("스승에게 배운다", "기예를 하나 익히세요", body.strip_edges(), "1, 2, 3 키로 고르세요")
+	_show_boon_offer()
 	_set_fps()
 
 
+func _show_boon_offer() -> void:
+	_phase = Phase.BOON
+	var body := ""
+	for i in _boon_offer.size():
+		var b: Dictionary = _boon_offer[i]
+		var mark := "  [강함]" if b.get("rare", false) else ""
+		body += "%d  %s%s\n     %s\n\n" % [i + 1, b["name"], mark, b["text"]]
+	body += "4  배우지 않고 넘어간다\n\n익힌 기예 %d/%d" % [_boons.size(), Boons.MAX_SLOTS]
+	if _boons.size() >= Boons.MAX_SLOTS:
+		body += "  (가득 참: 새로 익히면 하나를 잊어야 합니다)"
+	_hud.show_card("스승에게 배운다", "기예를 하나 익히세요", body, "1, 2, 3 키로 고르세요")
+
+
 func _take_boon(i: int) -> void:
+	if i == 3:
+		_begin_stage(_boon_next)
+		return
 	if i >= _boon_offer.size():
 		return
+	if _boons.size() >= Boons.MAX_SLOTS:
+		_boon_pending = i
+		_show_boon_drop()
+		return
+	_learn(i, -1)
+
+
+## All slots are taken: pick the one to forget (5 cancels).
+func _show_boon_drop() -> void:
+	_phase = Phase.BOON_DROP
+	var body := "'%s' 을(를) 익히려면 하나를 잊어야 합니다.\n\n" % _boon_offer[_boon_pending]["name"]
+	for k in _boons.size():
+		var b := Boons.get_boon(_boons[k])
+		body += "%d  %s\n     %s\n\n" % [k + 1, b["name"], b["text"]]
+	body += "5  취소"
+	_hud.show_card("기예가 가득 찼습니다", "무엇을 잊을까요", body, "1~4 키로 고르세요")
+
+
+func _drop_boon(k: int) -> void:
+	if k == 4:
+		_show_boon_offer()
+		return
+	if k >= _boons.size():
+		return
+	_learn(_boon_pending, k)
+
+
+## Learn offered boon `i`, forgetting the owned one at `forget` (-1: nothing to forget).
+func _learn(i: int, forget: int) -> void:
+	if forget >= 0:
+		_boons.remove_at(forget)
 	_boons.append(_boon_offer[i]["id"])
 	_save_progress()
 	_hud.popup(_boon_offer[i]["name"], GOLD)
@@ -634,7 +686,7 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 	match result:
 		"PARRY!":
 			_stats["parries"] += 1
-			_player.hp = minf(_player.hp + _player.mod("parry_heal"), 100.0)
+			_player.hp = clampf(_player.hp + _player.mod("parry_heal"), 1.0, 100.0)
 			_hud.popup("쳐내기!", GOLD)
 			_hitstop(0.09)
 			_slowmo(0.35, 0.3)

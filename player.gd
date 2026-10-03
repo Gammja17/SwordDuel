@@ -450,7 +450,7 @@ func _try_dodge() -> void:
 func receive_cut(strength: float, _pos: Vector3, _dir: Vector3) -> void:
 	if not alive:
 		return
-	var dmg := clampf(strength * 2.4, 6.0, 34.0)
+	var dmg := clampf(strength * 2.4, 6.0, 34.0) * (1.0 + mod("damage_taken"))
 	if not practice:
 		hp = maxf(hp - dmg, 0.0)
 	hurt_flash = 1.0
@@ -490,7 +490,7 @@ func _physics_process(delta: float) -> void:
 	if _parry_t >= 0.0:
 		_parry_t += delta
 	if _since_block > POSTURE_RECOVER_DELAY and posture > 0.0:
-		posture = maxf(posture - POSTURE_RECOVER_RATE * delta, 0.0)
+		posture = maxf(posture - POSTURE_RECOVER_RATE * (1.0 + mod("posture_recover")) * delta, 0.0)
 
 	if alive and (locked or in_bind):
 		_face_target(delta)
@@ -687,7 +687,7 @@ func request_cut(heading: Vector2) -> void:
 	_cut_dir = heading.normalized()
 	_cut_t = 0.0
 	_cut_whoosh = false
-	breath = maxf(breath - CUT_COST, 0.0)
+	breath = maxf(breath - CUT_COST * (1.0 + mod("cut_cost")), 0.0)
 	_flick = Vector2.ZERO
 	# When it is over, the blade rests on the side the cut went to.
 	_aim_target = _clamp_aim(AIM_REST + Vector2(_cut_side.x, _cut_side.y) * 0.9)
