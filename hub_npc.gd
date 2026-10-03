@@ -22,6 +22,7 @@ func setup(id: String, name_: String, outfit: String, look_at_target: Node3D) ->
 	add_child(_body)
 	_body.build(Color(), false, outfit)
 	_body._two_hands = 0.0
+	_body._grip_hands.open_left = true
 	var label := Label3D.new()
 	label.text = name_
 	label.font = load(FONT_TITLE)

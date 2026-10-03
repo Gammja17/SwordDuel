@@ -567,11 +567,11 @@ func _physics_process(delta: float) -> void:
 	grip = _within_reach(grip) - dip
 	sword.drive(to_global(grip), global_transform.basis * dir, delta)
 	var blade_basis := sword.transform.basis
-	_arm_r.pose(SHOULDER_R - dip, grip, Vector3(0.7, -0.7, 0.1), blade_basis)
+	_arm_r.pose(SHOULDER_R - dip, grip, Vector3(1.0, -0.35, 0.0), blade_basis)
 	var left_hand := grip - dir * SwordMesh.LEFT_HAND
 	if _special == "execute" and _sp_t < _sp_end(3) and target != null:
 		left_hand = to_local(_grab_point())   # the left hand has hold of them
-	_arm_l.pose(SHOULDER_L - dip, left_hand, Vector3(-0.7, -0.7, 0.1), blade_basis)
+	_arm_l.pose(SHOULDER_L - dip, left_hand, Vector3(-1.0, -0.35, 0.0), blade_basis)
 
 	_update_camera(delta, moving)
 

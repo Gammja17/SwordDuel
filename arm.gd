@@ -18,9 +18,9 @@ func _init(parent: Node3D, upper: float, fore: float, sleeve: Material, plate: M
 		glove: Material, shadows := true) -> void:
 	upper_len = upper
 	fore_len = fore
-	_upper = Armor.part(parent, Armor.capsule(0.040, upper + 0.08), sleeve)
-	_fore = Armor.part(parent, Armor.capsule(0.034, fore + 0.05), plate)
-	_elbow = Armor.part(parent, Armor.sphere(0.042), sleeve)
+	_upper = Armor.part(parent, Armor.capsule(0.034, upper + 0.08), sleeve)
+	_fore = Armor.part(parent, Armor.capsule(0.028, fore + 0.05), plate)
+	_elbow = Armor.part(parent, Armor.sphere(0.036), sleeve)
 	_hand = Armor.part(parent, Armor.box(Vector3(0.062, 0.055, 0.085)), glove)
 	if not shadows:
 		for mi in [_upper, _fore, _elbow, _hand]:

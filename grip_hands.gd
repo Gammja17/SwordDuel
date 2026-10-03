@@ -5,6 +5,7 @@ extends SkeletonModifier3D
 
 var right_target: Node3D   # the right wrist's place on the sword
 var left_target: Node3D
+var open_left := false   # the hand off the sword lies open (cutscenes, standing about)
 
 
 func _process_modification_with_delta(_delta: float) -> void:
@@ -19,6 +20,12 @@ func _apply() -> void:
 	var sk := get_skeleton()
 	if sk == null:
 		return
+	if open_left:
+		for f in ["Thumb", "Index", "Middle", "Ring", "Little"]:
+			for seg in ["Metacarpal", "Proximal", "Intermediate", "Distal"]:
+				var fb := sk.find_bone("Left" + f + seg)
+				if fb >= 0:
+					sk.set_bone_pose_rotation(fb, sk.get_bone_rest(fb).basis.get_rotation_quaternion())
 	var inv := sk.global_transform.basis.orthonormalized().inverse()
 	for pair in [["RightHand", right_target], ["LeftHand", left_target]]:
 		var t := pair[1] as Node3D

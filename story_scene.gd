@@ -197,6 +197,7 @@ func _add_actor(id: String, spec: Dictionary) -> void:
 	body.build(spec.get("tabard", Color()), spec.get("crest", false), spec.get("outfit", "squire"))
 	body.position = spec.get("at", Vector3.ZERO)
 	body._two_hands = 0.0   # the left hand hangs free
+	body._grip_hands.open_left = true
 	var a := {"body": body, "goal": null, "clip": "Idle_Loop", "clip_t": 0.0, "walking": false, "pose": spec.get("pose", "relaxed")}
 	_actors[id] = a
 

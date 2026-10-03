@@ -69,6 +69,16 @@ const OUTFITS := {
 	"woman_peasant": ["Female_Peasant", ["Hair_Long"], Color(1.0, 1.0, 1.0), Color(0.30, 0.18, 0.10), FEMALE_FACE],
 	"woman_ranger": ["Female_Ranger", ["Hair_Buns"], Color(0.62, 0.50, 0.85), Color(0.78, 0.62, 0.30), FEMALE_FACE],
 }
+# Pieces put on over the clothes so that people are told apart by their outline (cape, shoulder
+# plate, circlet) and not by the one face and the two outfits there are. By outfit name.
+const GEAR := {
+	"kaiden": [["cape", Color(0.12, 0.22, 0.62)], ["pauldrons", Color.WHITE], ["circlet", Color(0.92, 0.74, 0.26)]],
+	"seohyuk": [["cape", Color(0.55, 0.08, 0.08)], ["pauldron_r", Color.WHITE]],
+	"leon": [["cape", Color(0.78, 0.62, 0.18)]],
+	"woman_ranger": [["cape", Color(0.40, 0.18, 0.62)], ["circlet", Color(0.85, 0.85, 0.9)]],
+	"guard": [["pauldrons", Color.WHITE]],
+	"master": [["cape", Color(0.16, 0.16, 0.18)], ["pauldron_r", Color.WHITE]],
+}
 const HEAD_BONES := ["Head", "Neck"]
 const SEGMENTS := ["Metacarpal", "Proximal", "Intermediate", "Distal"]
 
@@ -233,7 +243,29 @@ func _dress_outfit(kind: String) -> void:
 	_wear(o[0], [], o[2], true)
 	for piece in o[1]:
 		_wear(piece, [], Color.WHITE, false, o[3])
+	_add_gear(GEAR.get(kind, []))
 	_hold_sword(Armor.dark_steel(), Armor.leather())
+
+
+func _add_gear(items: Array) -> void:
+	for g in items:
+		match g[0]:
+			"cape":
+				var cape := Armor.part(_attach("Chest"), Armor.box(Vector3(0.44, 0.85, 0.025)), Armor.two_sided(Armor.cloth(g[1])), Vector3(0.0, -0.3, -0.17))
+				cape.rotation_degrees.x = 4.0
+			"pauldrons", "pauldron_r":
+				for side in (["Left", "Right"] if g[0] == "pauldrons" else ["Right"]):
+					var p := Armor.part(_attach(side + "UpperArm"), Armor.sphere(0.085), Armor.steel(), Vector3(0.0, 0.04, 0.0))
+					p.scale = Vector3(1.25, 0.9, 1.25)
+			"circlet":
+				var ring := TorusMesh.new()
+				ring.inner_radius = 0.094
+				ring.outer_radius = 0.108
+				var mat := StandardMaterial3D.new()
+				mat.albedo_color = g[1]
+				mat.metallic = 0.9
+				mat.roughness = 0.3
+				Armor.part(_attach("Head"), ring, mat, Vector3(0.0, 0.16, 0.0))
 
 
 ## Put a modelled piece on: each of its meshes is moved onto our skeleton (its skin binds
