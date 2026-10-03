@@ -64,6 +64,7 @@ var _boon_pending := 0
 var _school := ""             # the fighting style this run is built around (saved)
 var _boon_lvls := {}          # id -> level of trained techniques (saved)
 var _boon_pending_list: Array = []
+var _tries := {}              # how many times each stage has beaten the player this run
 var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
@@ -317,7 +318,19 @@ func _intro(tier: int) -> void:
 	_set_fps()
 
 
+## What the opponent shouts: when the fight starts (or starts again), or just after it
+## was parried. Lines are in campaign.gd.
+func _bark(kind: String) -> void:
+	var lines: Array = Campaign.STAGES[_tier].get("barks", {}).get(kind, [])
+	if kind == "start" and int(_tries.get(_tier, 0)) > 0:
+		lines = Campaign.STAGES[_tier].get("barks", {}).get("retry", lines)
+	if lines.is_empty() or _elite:
+		return
+	_hud.hint(lines[randi() % lines.size()], 3.0)
+
+
 func _start_fight() -> void:
+	_bark("start")
 	_phase = Phase.FIGHT
 	_hud.hide_card()
 	_hud.show_fight_ui(true)
@@ -349,6 +362,7 @@ func _won() -> void:
 
 
 func _on_player_died() -> void:
+	_tries[_tier] = int(_tries.get(_tier, 0)) + 1
 	_stats["won"] = false
 	get_tree().create_timer(1.8).timeout.connect(_outcome)
 
@@ -628,6 +642,7 @@ func _reset_campaign() -> void:
 	_boons = []
 	_boon_lvls = {}
 	_school = ""
+	_tries = {}
 	_save_progress()
 
 
@@ -659,6 +674,7 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 	_hud.clear_task()
 	_hud.hide_bind()
 	var s := StoryScene.new()
+	_flags["school"] = maxi(Schools.ORDER.find(_school), 0)   # scene lines can react to the school
 	s.flags = _flags
 	s.speed = float(_prefs["text"])
 	add_child(s)
@@ -824,6 +840,8 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 		"PARRY!":
 			_stats["parries"] += 1
 			_player.hp = clampf(_player.hp + _player.mod("parry_heal"), 1.0, 100.0)
+			if randf() < 0.4 and _phase == Phase.FIGHT:
+				_bark("parried")
 			_hud.popup("쳐내기!", GOLD)
 			_hitstop(0.09)
 			_slowmo(0.35, 0.3)

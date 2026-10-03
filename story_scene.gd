@@ -136,9 +136,8 @@ func _next() -> void:
 		_actors[id].clip = b["clip"][id]
 		_actors[id].clip_t = 0.0
 		if _actors[id].clip == "":
-			_actors[id].body.release(0.3)
-		else:
-			_play_clip(id)
+			_actors[id].clip = "Idle_Loop"   # back to standing easy
+		_play_clip(id)
 	if b.has("choice"):
 		_start_choice(b["choice"])
 		return
@@ -198,7 +197,7 @@ func _add_actor(id: String, spec: Dictionary) -> void:
 	body.build(spec.get("tabard", Color()), spec.get("crest", false), spec.get("outfit", "squire"))
 	body.position = spec.get("at", Vector3.ZERO)
 	body._two_hands = 0.0   # the left hand hangs free
-	var a := {"body": body, "goal": null, "clip": "", "clip_t": 0.0, "pose": spec.get("pose", "relaxed")}
+	var a := {"body": body, "goal": null, "clip": "Idle_Loop", "clip_t": 0.0, "walking": false, "pose": spec.get("pose", "relaxed")}
 	_actors[id] = a
 
 
@@ -226,11 +225,17 @@ func _play_clip(id: String) -> void:
 func _update_actor(id: String, delta: float) -> void:
 	var a: Dictionary = _actors[id]
 	var body: Node3D = a.body
+	if a.goal != null and not a.walking:
+		a.walking = true
+		body.release(0.12)   # the legs walk (an action clip would freeze them)
 	if a.goal != null:
 		var to: Vector3 = a.goal - body.global_position
 		to.y = 0.0
 		if to.length() < 0.06:
 			a.goal = null
+			a.walking = false
+			a.clip_t = 0.0
+			_play_clip(id)
 			body.move(Vector2.ZERO)
 		else:
 			_face(id, a.goal)
@@ -238,7 +243,7 @@ func _update_actor(id: String, delta: float) -> void:
 			body.move(Vector2(0.0, _speed))
 	else:
 		body.move(Vector2.ZERO)
-	if a.clip != "":
+	if a.clip != "" and not a.walking:
 		a.clip_t += delta
 		if a.clip_t >= body.clip_length(a.clip):
 			a.clip_t = 0.0
