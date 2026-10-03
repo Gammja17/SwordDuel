@@ -43,6 +43,19 @@ const STAGES := [
 			"bind_press": 0.5, "bind_strength": 0.95, "armor": 1.0, "speed": 2.3, "outfit": "taesan"},
 		"place": "dusk", "rank": [30, 25], "barks": {"start": ["태산: 덤벼라, 꼴찌.", "태산: 한 칸이 제일 비싸다."], "retry": ["태산: 또 왔나. 끈질기군.", "태산: 쓰러진 자리에서 일어나는 건 인정하지."], "parried": ["태산: ……제법인데.", "태산: 이 맛이군."]},
 		"pre": ["taesan_pre"], "post": ["taesan_post"]},
+	# --- 연전: a room of weak fighters taken one after another. Health carries over. ---
+	{"kicker": "연전 · 수련장", "name": "수련장 연습병 무리",
+		"about": "연습병 셋이 차례로 덤빕니다. 하나하나는 약하지만 체력은 이어지니 아껴 싸우세요.",
+		"fighter": {}, "rank": [0, 0], "place": "dusk", "pre": [], "post": [],
+		"barks": {"start": ["연습병: 차례로 간다!", "연습병: 꼴찌는 우리 몫이지!"], "retry": ["연습병: 또 왔네!", "연습병: 이번엔 셋 다 넘겨 보시지!"], "parried": ["연습병: 으악!", "연습병: 막았어?!"]},
+		"wave": [
+			{"name": "연습병 갑", "hp": 36.0, "windup": 0.56, "attack": 0.24, "recover": 0.6, "poise": Vector2(0.8, 1.5), "lines": ["c"],
+				"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.0, "parry": 0.0, "punish": 0.1, "damage": 0.5, "armor": 0.3, "speed": 2.3, "outfit": "recruit"},
+			{"name": "연습병 을", "hp": 40.0, "windup": 0.5, "attack": 0.22, "recover": 0.55, "poise": Vector2(0.6, 1.2), "lines": ["a", "b"],
+				"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.1, "parry": 0.05, "punish": 0.2, "damage": 0.5, "armor": 0.4, "speed": 2.5, "outfit": "recruit"},
+			{"name": "연습병 병", "hp": 46.0, "windup": 0.46, "attack": 0.22, "recover": 0.5, "poise": Vector2(0.5, 1.0), "lines": ["a", "b", "c"],
+				"dodge": 0.05, "feint": 0.1, "combo": 0.1, "riposte": 0.15, "parry": 0.1, "punish": 0.3, "damage": 0.55, "armor": 0.6, "speed": 2.6, "outfit": "recruit"},
+		]},
 	{"kicker": "순위전 · 25위 → 18위", "name": "하급 귀족 레온",
 		"about": "속임수를 많이 씁니다. 치켜든 쪽을 바꾸고, 쳐내기를 자주 시도합니다.",
 		"fighter": {"hp": 80.0, "windup": 0.42, "attack": 0.21, "feint": 0.6, "parry": 0.4, "dodge": 0.2,
@@ -54,6 +67,16 @@ const STAGES := [
 		"fighter": {"outfit": "knight"},
 		"place": "rain", "rank": [18, 10], "barks": {"start": ["서혁: 정정당당히.", "서혁: 빗길을 조심하게."], "retry": ["서혁: 다시 서게. 예를 갖추겠네.", "서혁: 졌다고 부끄러워 말게."], "parried": ["서혁: ……좋은 수다.", "서혁: 읽혔군."]},
 		"pre": ["report", "mujin_train", "seohyuk_pre"], "post": ["seohyuk_post"]},
+	{"kicker": "연전 · 귀족가 호위병", "name": "귀족가 호위병 둘",
+		"about": "귀족 자제를 따라온 호위병 둘이 길을 막습니다. 갑옷이 단단하고 노련합니다.",
+		"fighter": {}, "rank": [0, 0], "place": "rain", "pre": [], "post": [],
+		"barks": {"start": ["호위병: 도련님께 가까이 오지 마라.", "호위병: 평민은 비켜라."], "retry": ["호위병: 또 나타났군.", "호위병: 질기구나."], "parried": ["호위병: 이놈!", "호위병: 감히!"]},
+		"wave": [
+			{"name": "호위병 갑", "hp": 58.0, "windup": 0.44, "attack": 0.21, "recover": 0.5, "poise": Vector2(0.5, 1.0), "lines": ["a", "b", "c"],
+				"dodge": 0.1, "feint": 0.15, "combo": 0.15, "riposte": 0.25, "parry": 0.2, "punish": 0.4, "damage": 0.6, "armor": 1.6, "speed": 2.6, "outfit": "guard"},
+			{"name": "호위병 을", "hp": 66.0, "windup": 0.42, "attack": 0.2, "recover": 0.48, "poise": Vector2(0.45, 0.9), "lines": ["a", "b", "c", "lunge"],
+				"dodge": 0.15, "feint": 0.2, "combo": 0.2, "riposte": 0.3, "parry": 0.25, "punish": 0.5, "damage": 0.65, "armor": 2.0, "speed": 2.7, "outfit": "guard"},
+		]},
 	{"kicker": "순위전 · 10위 → 3위", "name": "대귀족 영애 세라핀",
 		"about": "빠르고 정확합니다. 찌르기로 거리를 깨고 들어오며, 물러나면 쫓아옵니다.",
 		"fighter": {"hp": 95.0, "windup": 0.40, "attack": 0.19, "lines": ["lunge", "a", "b"], "dodge": 0.3,
@@ -135,12 +158,14 @@ static func count() -> int:
 
 
 ## The full opponent dictionary for a stage: base numbers, then its own, then the card text.
-static func tier(i: int) -> Dictionary:
+static func tier(i: int, k := 0) -> Dictionary:
 	var s: Dictionary = STAGES[i]
 	var t: Dictionary = BASE.duplicate()
 	t.merge(s["fighter"], true)
+	if s.has("wave"):
+		t.merge(s["wave"][k], true)   # a wave room: the k-th fighter
 	t["kicker"] = s["kicker"]
-	t["name"] = (s["name"] as String)
+	t["name"] = (s["name"] as String) if not s.has("wave") else String(s["wave"][k]["name"])
 	t["about"] = s["about"]
 	return t
 

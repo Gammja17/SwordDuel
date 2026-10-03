@@ -67,6 +67,9 @@ var _boon_pending_list: Array = []
 var _tries := {}              # how many times each stage has beaten the player this run
 var _meta := {"pts": 0, "runs": 0, "best_stage": 0, "up": {}}   # kept across runs (saved)
 var _seen := {}               # cutscenes already shown: they play once (saved)
+var _wave_idx := 0           # which fighter of a wave room is up
+var _hp_mult := 1.0
+var _dmg_mult := 1.0
 var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
@@ -308,18 +311,22 @@ func _intro(tier: int) -> void:
 	_phase = Phase.INTRO
 	var t: Dictionary = Campaign.tier(tier)
 	var d := _difficulty()
+	_wave_idx = 0
 	t["hp"] = float(t["hp"]) * float(d["hp"])
+	_hp_mult = float(d["hp"])
 	var elite_dmg := 1.0
 	if _elite:
 		# The rival you beat, come back stronger.
 		t["hp"] = float(t["hp"]) * 1.4
+		_hp_mult *= 1.4
 		t["name"] = "복수전 · " + String(t["name"])
 		t["kicker"] = "정예 도전"
 		t["about"] = "한 번 졌던 상대가 힘을 길러 돌아왔습니다. 더 단단하고 더 아프게 칩니다."
 		t["parry"] = minf(float(t.get("parry", 0.0)) + 0.15, 0.9)
 		elite_dmg = 1.25
 	_spawn_duel(t)
-	_opponent.dmg_mult = float(d["dmg"]) * elite_dmg
+	_dmg_mult = float(d["dmg"]) * elite_dmg
+	_opponent.dmg_mult = _dmg_mult
 	_player.mods = _player_mods(tier)
 	_hud.set_status(_status_text())
 	var place: Dictionary = Campaign.place_of(tier)
@@ -346,12 +353,36 @@ func _bark(kind: String) -> void:
 	_hud.hint(lines[randi() % lines.size()], 3.0)
 
 
+## The next fighter of a wave steps in: the player and their health stay as they are.
+func _next_mob() -> void:
+	if _phase != Phase.FIGHT or not is_instance_valid(_player) or not _player.alive:
+		return
+	_wave_idx += 1
+	for n in [_opponent, _combat]:
+		if is_instance_valid(n):
+			n.queue_free()
+	var t: Dictionary = Campaign.tier(_tier, _wave_idx)
+	t["hp"] = float(t["hp"]) * _hp_mult
+	_spawn_opponent(t)
+	_opponent.dmg_mult = _dmg_mult
+	_hud.set_enemy(_enemy_label())
+	_opponent.begin()
+	_bark("start")
+
+
+func _enemy_label() -> String:
+	var wave: Array = Campaign.STAGES[_tier].get("wave", [])
+	if wave.is_empty() or _elite:
+		return _opponent.display_name
+	return "%s   %d/%d" % [_opponent.display_name, _wave_idx + 1, wave.size()]
+
+
 func _start_fight() -> void:
 	_bark("start")
 	_phase = Phase.FIGHT
 	_hud.hide_card()
 	_hud.show_fight_ui(true)
-	_hud.set_enemy(_opponent.display_name)
+	_hud.set_enemy(_enemy_label())
 	_capture_mouse()
 	_player.active = true
 	_opponent.begin()
@@ -361,6 +392,11 @@ func _start_fight() -> void:
 
 ## Run through (or cut down) in the last duel: the finishing blow was the player's choice.
 func _on_opponent_died() -> void:
+	var wave: Array = Campaign.STAGES[_tier].get("wave", [])
+	if not _elite and _wave_idx + 1 < wave.size():
+		_hud.popup("다음!", GOLD)
+		get_tree().create_timer(1.1).timeout.connect(_next_mob)
+		return
 	if _tier + 1 >= Campaign.count():
 		_ending = "execute"
 	_won()
@@ -857,6 +893,20 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.position = Vector3(0.0, 0.0, 2.0)
 	_player.sens = float(_prefs["sens"])
 
+	_spawn_opponent(tier)
+
+	_player.camera().current = true
+	_player.sword.cut_registered.connect(_on_cut)
+	_player.sword.clash_registered.connect(_on_clash)
+	_player.sword.weak_touch.connect(_on_weak_touch)
+	_player.special_struck.connect(_on_special_struck)
+	_player.execution_started.connect(_on_execution_started)
+	_player.hurt.connect(_on_player_hurt)
+	_player.lock_changed.connect(_on_lock_changed)
+	_player.died.connect(_on_player_died)
+
+
+func _spawn_opponent(tier: Dictionary) -> void:
 	_opponent = OpponentScript.new()
 	_opponent.name = "Opponent"
 	add_child(_opponent)
@@ -870,16 +920,6 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_combat.tier = tier
 	add_child(_combat)
 	_combat.bind_ended.connect(_on_bind_ended)
-
-	_player.camera().current = true
-	_player.sword.cut_registered.connect(_on_cut)
-	_player.sword.clash_registered.connect(_on_clash)
-	_player.sword.weak_touch.connect(_on_weak_touch)
-	_player.special_struck.connect(_on_special_struck)
-	_player.execution_started.connect(_on_execution_started)
-	_player.hurt.connect(_on_player_hurt)
-	_player.lock_changed.connect(_on_lock_changed)
-	_player.died.connect(_on_player_died)
 	_opponent.died.connect(_on_opponent_died)
 	_opponent.phase_changed.connect(_on_boss_phase)
 	_opponent.yielded.connect(_on_boss_yield)

@@ -63,6 +63,8 @@ const OUTFITS := {
 	"taesan": ["Male_Peasant", ["Hair_Buzzed"], Color(0.62, 0.55, 0.50), Color(0.10, 0.07, 0.05)],
 	"leon": ["Male_Ranger", ["Hair_SimpleParted"], Color(0.95, 0.85, 0.45), Color(0.62, 0.45, 0.22)],
 	"kaiden": ["Male_Ranger", ["Hair_SimpleParted"], Color(0.50, 0.62, 0.95), Color(0.85, 0.80, 0.55)],
+	"recruit": ["Male_Peasant", ["Hair_Buzzed"], Color(0.62, 0.64, 0.70), Color(0.30, 0.22, 0.14)],
+	"guard": ["Male_Ranger", ["Hair_Buzzed"], Color(0.55, 0.20, 0.18), Color(0.20, 0.14, 0.10)],
 	# Women: the fifth entry is the base body whose face and eyes show (the default is the man's).
 	"woman_peasant": ["Female_Peasant", ["Hair_Long"], Color(1.0, 1.0, 1.0), Color(0.30, 0.18, 0.10), FEMALE_FACE],
 	"woman_ranger": ["Female_Ranger", ["Hair_Buns"], Color(0.62, 0.50, 0.85), Color(0.78, 0.62, 0.30), FEMALE_FACE],
