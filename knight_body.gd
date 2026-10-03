@@ -58,7 +58,8 @@ const OUTFITS := {
 	"knight": ["Male_Ranger", ["Hair_Beard"], Color(0.95, 0.66, 0.5), Color(0.22, 0.14, 0.09)],
 	"master": ["Male_Ranger", ["Hair_Beard"], Color(0.42, 0.40, 0.40), Color(0.55, 0.53, 0.50)],
 	# The player, seen only in an execution: the outfit's own green.
-	"player": ["Male_Ranger", ["Hair_Beard"], Color(1.0, 1.0, 1.0), Color(0.18, 0.12, 0.08)],
+	"player": ["Male_Peasant", ["Hair_SimpleParted"], Color(0.30, 0.40, 0.70), Color(0.30, 0.20, 0.12)],
+	"player_f": ["Female_Peasant", ["Hair_Long"], Color(0.30, 0.40, 0.70), Color(0.30, 0.20, 0.12), FEMALE_FACE],
 	# Story rivals: the same clothes in their own colours.
 	"taesan": ["Male_Peasant", ["Hair_Buzzed"], Color(0.62, 0.55, 0.50), Color(0.10, 0.07, 0.05)],
 	"leon": ["Male_Ranger", ["Hair_SimpleParted"], Color(0.95, 0.85, 0.45), Color(0.62, 0.45, 0.22)],
@@ -72,6 +73,8 @@ const OUTFITS := {
 # Pieces put on over the clothes so that people are told apart by their outline (cape, shoulder
 # plate, circlet) and not by the one face and the two outfits there are. By outfit name.
 const GEAR := {
+	"player": [["cape", Color(0.10, 0.16, 0.38)], ["pauldron_r", Color.WHITE]],
+	"player_f": [["cape", Color(0.10, 0.16, 0.38)], ["pauldron_r", Color.WHITE]],
 	"kaiden": [["cape", Color(0.12, 0.22, 0.62)], ["pauldrons", Color.WHITE], ["circlet", Color(0.92, 0.74, 0.26)]],
 	"seohyuk": [["cape", Color(0.55, 0.08, 0.08)], ["pauldron_r", Color.WHITE]],
 	"leon": [["cape", Color(0.78, 0.62, 0.18)]],

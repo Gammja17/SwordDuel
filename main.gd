@@ -21,7 +21,7 @@ const Schools := preload("res://schools.gd")
 const HubPlayerScript := preload("res://hub_player.gd")
 const HubNpcScript := preload("res://hub_npc.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, DOOR, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -76,12 +76,14 @@ var _hub_player: CharacterBody3D
 var _hub_nodes: Array[Node] = []
 var _hub_spots: Array = []
 var _hub_near := {}
+var _used_rivals: Array = []   # rivals already met this term
+var _door_options: Array = []
 var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
 var _torch_scale := 1.0
 var _scene_music := "calm"
-var _prefs := {"quality": 1 if OS.has_feature("web") else 2, "difficulty": 1, "sens": 1.0, "text": 1.0, "fullscreen": false}
+var _prefs := {"quality": 1 if OS.has_feature("web") else 2, "difficulty": 1, "hero": 0, "sens": 1.0, "text": 1.0, "fullscreen": false}
 var _war := false             # the courtyard is burning
 var _war_nodes: Array[Node] = []
 var _sun: DirectionalLight3D
@@ -221,6 +223,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_pick_path(sk - KEY_1)
 		return
+	if _phase == Phase.DOOR and event is InputEventKey and event.pressed and not event.is_echo():
+		var dk := (event as InputEventKey).physical_keycode
+		if dk >= KEY_1 and dk <= KEY_3:
+			_pick_door(dk - KEY_1)
+		return
 	if _phase == Phase.UPGRADE and event is InputEventKey and event.pressed and not event.is_echo():
 		var uk := (event as InputEventKey).physical_keycode
 		if uk >= KEY_1 and uk <= KEY_5:
@@ -272,9 +279,9 @@ func _advance() -> void:
 				else:
 					_path_menu(_boon_next)
 			elif _stats.get("won", false):
-				var post: Array = Campaign.STAGES[_tier]["post"].duplicate()
+				var post: Array = Campaign.stage(_tier)["post"].duplicate()
 				if _tier + 1 < Campaign.count():
-					_run_scenes(post, _path_menu.bind(_tier + 1))
+					_run_scenes(post, _reward.bind(_tier + 1))
 				elif _ending == "":
 					_choice()
 				else:
@@ -352,9 +359,9 @@ func _intro(tier: int) -> void:
 ## What the opponent shouts: when the fight starts (or starts again), or just after it
 ## was parried. Lines are in campaign.gd.
 func _bark(kind: String) -> void:
-	var lines: Array = Campaign.STAGES[_tier].get("barks", {}).get(kind, [])
+	var lines: Array = Campaign.stage(_tier).get("barks", {}).get(kind, [])
 	if kind == "start" and int(_tries.get(_tier, 0)) > 0:
-		lines = Campaign.STAGES[_tier].get("barks", {}).get("retry", lines)
+		lines = Campaign.stage(_tier).get("barks", {}).get("retry", lines)
 	if lines.is_empty() or _elite:
 		return
 	_hud.hint(lines[randi() % lines.size()], 3.0)
@@ -378,7 +385,7 @@ func _next_mob() -> void:
 
 
 func _enemy_label() -> String:
-	var wave: Array = Campaign.STAGES[_tier].get("wave", [])
+	var wave: Array = Campaign.stage(_tier).get("wave", [])
 	if wave.is_empty() or _elite:
 		return _opponent.display_name
 	return "%s   %d/%d" % [_opponent.display_name, _wave_idx + 1, wave.size()]
@@ -399,7 +406,7 @@ func _start_fight() -> void:
 
 ## Run through (or cut down) in the last duel: the finishing blow was the player's choice.
 func _on_opponent_died() -> void:
-	var wave: Array = Campaign.STAGES[_tier].get("wave", [])
+	var wave: Array = Campaign.stage(_tier).get("wave", [])
 	if not _elite and _wave_idx + 1 < wave.size():
 		_hud.popup("다음!", GOLD)
 		get_tree().create_timer(1.1).timeout.connect(_next_mob)
@@ -450,6 +457,12 @@ func _outcome() -> void:
 		_set_fps()
 		return
 	if _stats["won"]:
+		var rid := String(Campaign.stage(_tier).get("id", ""))
+		if rid in Campaign.MID_RIVALS or rid == "kaiden":
+			var met: Array = _meta.get("met", [])
+			if not met.has(rid):
+				met.append(rid)
+			_meta["met"] = met
 		var before := _rank
 		_rank = Campaign.rank_after_win(_tier, _rank)
 		_stage = _tier + 1
@@ -523,7 +536,7 @@ func _credits() -> void:
 ## After a win: three techniques to learn, one is kept (or none). Only MAX_SLOTS fit, so
 ## a full set means pushing one out. Then on to the next duel.
 func _boon_pick(next_stage: int, rare_only := false) -> void:
-	_boon_offer = Boons.roll(_boons, _school, 3, rare_only)
+	_boon_offer = Boons.roll(_boons, _school, 3, rare_only, _grade() >= 2)
 	if _boon_offer.is_empty():
 		_begin_stage(next_stage)
 		return
@@ -544,19 +557,19 @@ func _show_boon_offer() -> void:
 		var b: Dictionary = _boon_offer[i]
 		var mark := "  [강함]" if b.get("rare", false) else ""
 		body += "%d  %s%s\n     %s\n\n" % [i + 1, b["name"], mark, b["text"]]
-	body += "4  배우지 않고 넘어간다\n\n익힌 기예 %d/%d" % [_boons.size(), Boons.MAX_SLOTS]
-	if _boons.size() >= Boons.MAX_SLOTS:
+	body += "4  배우지 않고 넘어간다\n\n익힌 기예 %d/%d" % [_boons.size(), _max_slots()]
+	if _boons.size() >= _max_slots():
 		body += "  (가득 참: 새로 익히면 하나를 잊어야 합니다)"
 	_hud.show_card("스승에게 배운다", "기예를 하나 익히세요", body, "1, 2, 3 키로 고르세요")
 
 
 func _take_boon(i: int) -> void:
 	if i == 3:
-		_begin_stage(_boon_next)
+		_next_room()
 		return
 	if i >= _boon_offer.size():
 		return
-	if _boons.size() >= Boons.MAX_SLOTS:
+	if _boons.size() >= _max_slots():
 		_boon_pending = i
 		_show_boon_drop()
 		return
@@ -591,7 +604,7 @@ func _learn(i: int, forget: int) -> void:
 	_boons.append(_boon_offer[i]["id"])
 	_save_progress()
 	_hud.popup(_boon_offer[i]["name"], GOLD)
-	_begin_stage(_boon_next)
+	_next_room()
 
 
 func _boon_names() -> String:
@@ -599,6 +612,83 @@ func _boon_names() -> String:
 	for id in _boons:
 		names.append(Boons.get_boon(id).get("name", id) + ("+" if int(_boon_lvls.get(id, 1)) > 1 else ""))
 	return ", ".join(names)
+
+
+# --- 문: 방을 나설 때마다 다음 방을 고른다 -----------------------------------------------------------
+
+## After a room's reward: the next room. Rivals and the war are fixed points; in between
+## there are doors to choose from, each with a room behind it and a reward in that room.
+func _next_room() -> void:
+	var opts := Campaign.next_options(Campaign.route.size(), _grade(), _used_rivals)
+	if opts.size() == 1:
+		_enter_room(opts[0])
+	else:
+		_door_menu(opts)
+
+
+func _grade() -> int:
+	return Campaign.grade_of(int(_meta.get("total", 0)))
+
+
+func _max_slots() -> int:
+	return Boons.MAX_SLOTS + (1 if _grade() >= 3 else 0)
+
+
+func _enter_room(opt: Dictionary) -> void:
+	if opt.get("rest", false):
+		_boon_next = Campaign.route.size()
+		_hud.popup("쉬어 간다", GOLD)
+		if _trainable().size() > 0:
+			_upgrade_menu()
+		else:
+			_boon_pick(_boon_next)
+		return
+	Campaign.route.append(opt["room"])
+	_begin_stage(Campaign.route.size() - 1)
+
+
+func _door_menu(opts: Array) -> void:
+	_phase = Phase.DOOR
+	_door_options = opts
+	_clear_duel()
+	_title_cam.current = true
+	_hud.show_fight_ui(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var reward_text := {"boon": "기예를 배운다", "train": "기예를 강화한다", "rare": "강한 기예를 얻는다"}
+	var body := ""
+	for i in opts.size():
+		var o: Dictionary = opts[i]
+		if o.get("rest", false):
+			body += "%d  휴식의 문\n     싸우지 않고 쉬며 기예 하나를 강화합니다.\n\n" % [i + 1]
+		else:
+			var r: Dictionary = o["room"]
+			body += "%d  %s\n     %s   ·   %s\n     보상: %s\n\n" % [i + 1, o["label"], r["name"], _room_place_name(r), reward_text.get(r["reward"], "")]
+	_hud.show_card("%d번째 방을 지나" % (Campaign.route.size() + 1), "어느 문으로 들어갈까", body.strip_edges(), "숫자 키로 고르세요")
+	_set_fps()
+
+
+func _room_place_name(room: Dictionary) -> String:
+	return String(Campaign.PLACES[room.get("place", "dusk")]["name"])
+
+
+func _pick_door(i: int) -> void:
+	if i < _door_options.size():
+		_enter_room(_door_options[i])
+
+
+## The reward for clearing the room just fought.
+func _reward(next_stage: int) -> void:
+	_boon_next = next_stage
+	match String(Campaign.stage(_tier).get("reward", "boon")):
+		"train":
+			if _trainable().size() > 0:
+				_upgrade_menu()
+			else:
+				_boon_pick(next_stage)
+		"rare":
+			_boon_pick(next_stage, true)
+		_:
+			_boon_pick(next_stage)
 
 
 # --- 유파, 길, 수련, 정예 도전 -----------------------------------------------------------------
@@ -630,7 +720,7 @@ func _pick_school(i: int) -> void:
 			_boons.append(gifts[0]["id"])
 	_save_progress()
 	_hud.popup(Schools.ALL[_school]["name"], GOLD)
-	_begin_stage(_boon_next)
+	_next_room()
 
 
 ## Between duels, a fork (like a map): learn a technique, train one you have, or take on a
@@ -643,7 +733,7 @@ func _path_menu(next_stage: int) -> void:
 	_title_cam.current = true
 	_hud.show_fight_ui(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var rival: String = Campaign.STAGES[next_stage - 1]["name"]
+	var rival: String = Campaign.stage(next_stage - 1)["name"]
 	var can_train := _trainable().size() > 0
 	var body := "1  배운다\n     스승에게 새 기예를 배웁니다. 셋 중 하나를 고릅니다.\n\n"
 	body += "2  수련한다" + ("" if can_train else "  (강화할 기예가 없습니다)") + "\n     익힌 기예 하나를 1.5배 강하게 만듭니다.\n\n"
@@ -681,7 +771,7 @@ func _upgrade_menu() -> void:
 
 func _pick_upgrade(k: int) -> void:
 	if k == 4:
-		_path_menu(_boon_next)
+		_next_room()
 		return
 	if k >= _boon_pending_list.size():
 		return
@@ -689,7 +779,7 @@ func _pick_upgrade(k: int) -> void:
 	_boon_lvls[id] = int(_boon_lvls.get(id, 1)) + 1
 	_save_progress()
 	_hud.popup(Boons.get_boon(id)["name"] + " 강화", GOLD)
-	_begin_stage(_boon_next)
+	_next_room()
 
 
 # --- 기숙사 (거점), 런, 영구 성장 -----------------------------------------------------------------
@@ -711,7 +801,7 @@ func _to_hub() -> void:
 		_set_war(false)
 		_set_place("dusk")
 		_build_hub()
-		_hud.hint("WASD 이동 · 마우스로 시점 · E 로 말을 걸거나 고릅니다", 6.0)
+		_hud.hint("%s   ·   WASD 이동 · E 로 말을 걸거나 고릅니다" % Campaign.grade_name(int(_meta.get("total", 0))), 6.0)
 	_hub_player.enabled = true
 	_hub_player.cam.current = true
 	_capture_mouse()
@@ -731,7 +821,7 @@ func _build_hub() -> void:
 			["taesan", "태산", "taesan", Vector3(5.7, 0.0, 2.0), 1], ["leon", "레온", "leon", Vector3(-2.4, 0.0, -6.0), 3],
 			["seohyuk", "서혁", "knight", Vector3(-5.8, 0.0, -0.5), 4], ["serafin", "세라핀", "woman_ranger", Vector3(2.6, 0.0, -6.0), 6],
 			["kaiden", "카이든", "kaiden", Vector3(0.0, 0.0, -2.6), 7]]:
-		if best < int(c[4]):
+		if int(c[4]) > 0 and not (_meta.get("met", []) as Array).has(c[0]):
 			continue
 		var npc := HubNpcScript.new()
 		npc.position = c[3]
@@ -838,6 +928,8 @@ func _pick_hub(i: int) -> void:
 
 func _start_run() -> void:
 	_meta["runs"] = int(_meta.get("runs", 0)) + 1
+	Campaign.route.clear()
+	_used_rivals = []
 	_stage = 0
 	_rank = Campaign.START_RANK
 	_ending = ""
@@ -858,15 +950,28 @@ func _run_end_card() -> void:
 	var pts := cleared * 10 + int(_totals.get("parries", 0)) * 2 + int(_totals.get("cuts", 0))
 	if _ending != "":
 		pts += 100
+	var grade_before := _grade()
 	_meta["pts"] = int(_meta.get("pts", 0)) + pts
+	_meta["total"] = int(_meta.get("total", 0)) + pts
 	_meta["best_stage"] = maxi(int(_meta.get("best_stage", 0)), cleared)
 	_save_progress()
 	var body := "이긴 상대 %d명   최종 석차 %d위\n\n수련 점수 +%d   (합계 %d)" % [cleared, _rank, pts, int(_meta["pts"])]
 	if not _boons.is_empty():
 		body += "\n\n익힌 기예: " + _boon_names()
+	if _grade() > grade_before:
+		body += "\n\n승급!  %s\n%s" % [Campaign.grade_name(int(_meta["total"])), Campaign.GRADE_GIFTS[_grade()]]
+	else:
+		body += "\n\n%s   다음 승급까지 %d점" % [Campaign.grade_name(int(_meta["total"])), maxi(_next_grade_cost(), 0)]
 	_hud.show_card("학기가 끝났습니다", "수련 기록", body, "클릭하면 기숙사로 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
 	_set_fps()
+
+
+func _next_grade_cost() -> int:
+	var g := _grade()
+	if g + 1 >= Campaign.GRADES.size():
+		return 0
+	return int(Campaign.GRADES[g + 1][0]) - int(_meta.get("total", 0))
 
 
 func _show_training() -> void:
@@ -934,9 +1039,9 @@ func _begin_stage(i: int) -> void:
 		_school_menu(i)
 		return
 	_tier = i
-	_set_place(Campaign.STAGES[i].get("place", "dusk"))
-	_set_war(bool(Campaign.STAGES[i].get("war", false)))
-	_run_scenes(Campaign.STAGES[i]["pre"].duplicate(), _intro.bind(i))
+	_set_place(Campaign.stage(i).get("place", "dusk"))
+	_set_war(bool(Campaign.stage(i).get("war", false)))
+	_run_scenes(Campaign.stage(i)["pre"].duplicate(), _intro.bind(i))
 
 
 ## Play the scenes one after another, then call `done`.
@@ -960,6 +1065,7 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 	_flags["school"] = maxi(Schools.ORDER.find(_school), 0)   # scene lines can react to the school
 	s.flags = _flags
 	s.speed = float(_prefs["text"])
+	s.hero_outfit = "player_f" if int(_prefs["hero"]) == 1 else "player"
 	add_child(s)
 	s.finished.connect(func():
 		_title_cam.current = true
@@ -1432,7 +1538,7 @@ func _apply_quality() -> void:
 
 func _on_pref_changed(key: String, value: float) -> void:
 	match key:
-		"quality", "difficulty":
+		"quality", "difficulty", "hero":
 			_prefs[key] = int(value)
 		"fullscreen":
 			_prefs[key] = value > 0.5
@@ -1516,9 +1622,9 @@ func _player_mods(stage: int) -> Dictionary:
 
 
 func _status_text() -> String:
-	var s := ""
+	var s := Campaign.grade_name(int(_meta.get("total", 0))) + "   ·   "
 	if _school != "":
-		s = Schools.ALL[_school]["name"] + "   ·   "
+		s += Schools.ALL[_school]["name"] + "   ·   "
 	s += "석차 %d위" % _rank
 	if not _boons.is_empty():
 		s += "   ·   " + _boon_names()

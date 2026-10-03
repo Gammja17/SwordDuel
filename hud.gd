@@ -192,7 +192,7 @@ func show_settings(volumes: Dictionary, in_game: bool, prefs := {}) -> void:
 	for bus in _sliders:
 		(_sliders[bus] as HSlider).set_value_no_signal(float(volumes.get(bus, prefs.get(bus, 1.0))) * 100.0)
 		_update_pct(bus)
-	for key in ["quality", "difficulty"]:
+	for key in ["quality", "difficulty", "hero"]:
 		(_pref_controls[key] as OptionButton).select(int(prefs.get(key, 1)))
 	if _pref_controls.has("fullscreen"):
 		(_pref_controls["fullscreen"] as CheckButton).set_pressed_no_signal(bool(prefs.get("fullscreen", false)))
@@ -510,7 +510,7 @@ func _build_settings() -> void:
 		box.add_child(line)
 		_sliders[bus] = slider
 
-	for row in [["quality", "그래픽", ["낮음", "보통", "높음"]], ["difficulty", "난이도", ["쉬움", "보통", "어려움"]]]:
+	for row in [["quality", "그래픽", ["낮음", "보통", "높음"]], ["difficulty", "난이도", ["쉬움", "보통", "어려움"]], ["hero", "주인공", ["남", "여"]]]:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 14)
 		var name_label := Label.new()

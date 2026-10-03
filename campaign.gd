@@ -155,13 +155,162 @@ static func upgrade_cost(u: Dictionary, level: int) -> int:
 	return int(u["base"]) * (level + 1)
 
 
+# --- 한 학기의 방들 -----------------------------------------------------------------------------
+# A term is a run of ROOMS. The rivals (and the war at the end) wait at set points, but the
+# rooms in between are drawn at random from doors, so no two terms go the same way.
+
+const ROUTE_LENGTH := 12
+static var route: Array = []   # the rooms of this term, as they were entered
+
+# Which of STAGES holds each named fighter's room.
+const RIVAL_INDEX := {"taesan": 0, "leon": 2, "seohyuk": 3, "serafin": 5, "kaiden": 6, "soldier": 7, "elite": 8, "baldor": 9}
+const MID_RIVALS := ["taesan", "leon", "seohyuk", "serafin"]
+const DOOR_PLACES := ["dusk", "dawn", "rain", "night", "overcast"]
+
+# The fighters of the wave rooms. Numbers grow with depth (scale_mob).
+const MOB_TYPES := {
+	"recruit": {"name": "연습병", "hp": 36.0, "windup": 0.56, "attack": 0.24, "recover": 0.6, "poise": Vector2(0.8, 1.5), "lines": ["c"],
+		"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.0, "parry": 0.0, "punish": 0.1, "damage": 0.5, "armor": 0.3, "speed": 2.3, "outfit": "recruit",
+		"shout": ["차례로 간다!", "꼴찌는 우리 몫이지!"]},
+	"spear": {"name": "창병", "hp": 44.0, "windup": 0.6, "attack": 0.22, "recover": 0.62, "poise": Vector2(0.7, 1.4), "lines": ["lunge"],
+		"dodge": 0.1, "feint": 0.0, "combo": 0.0, "riposte": 0.1, "parry": 0.1, "punish": 0.3, "damage": 0.6, "armor": 0.6, "speed": 2.5, "outfit": "recruit",
+		"shout": ["찌른다!", "거리를 지켜라!"]},
+	"shield": {"name": "방패병", "hp": 62.0, "windup": 0.55, "attack": 0.26, "recover": 0.5, "poise": Vector2(0.6, 1.2), "lines": ["c"],
+		"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.3, "parry": 0.45, "punish": 0.3, "damage": 0.6, "armor": 2.4, "speed": 2.2, "outfit": "guard",
+		"shout": ["뚫어 보시지!", "쳐내는 건 내 몫이다."]},
+	"swift": {"name": "쾌검 신입", "hp": 34.0, "windup": 0.36, "attack": 0.17, "recover": 0.45, "poise": Vector2(0.4, 0.9), "lines": ["a", "b"],
+		"dodge": 0.3, "feint": 0.2, "combo": 0.25, "riposte": 0.1, "parry": 0.05, "punish": 0.3, "damage": 0.5, "armor": 0.3, "speed": 3.0, "outfit": "leon",
+		"shout": ["빠르다고 소문났지!", "잡아 봐!"]},
+	"brute": {"name": "힘센 신입", "hp": 72.0, "windup": 0.64, "attack": 0.28, "recover": 0.7, "poise": Vector2(0.9, 1.6), "lines": ["c", "a"],
+		"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.0, "parry": 0.1, "punish": 0.2, "damage": 0.85, "armor": 1.0, "speed": 2.2, "outfit": "taesan",
+		"bind_press": 0.5, "bind_strength": 0.95, "shout": ["으랏차!", "한 방이면 된다!"]},
+	"guard": {"name": "호위병", "hp": 58.0, "windup": 0.44, "attack": 0.21, "recover": 0.5, "poise": Vector2(0.5, 1.0), "lines": ["a", "b", "c"],
+		"dodge": 0.1, "feint": 0.15, "combo": 0.15, "riposte": 0.25, "parry": 0.2, "punish": 0.4, "damage": 0.6, "armor": 1.6, "speed": 2.6, "outfit": "guard",
+		"shout": ["도련님께 가까이 오지 마라.", "평민은 비켜라."]},
+}
+
+# 승급: total training points -> grade. A higher grade opens more of the school.
+const GRADES := [[0, "견습생"], [60, "정규생"], [160, "상급생"], [320, "선임생"], [560, "수석 후보"]]
+const GRADE_GIFTS := [
+	"", "휴식의 문과 정예의 문이 열립니다.", "강한 기예가 평소에도 나옵니다.",
+	"기예를 한 칸 더 지닐 수 있습니다.", "문이 세 개로 늘어납니다.",
+]
+
+
+static func grade_of(total: int) -> int:
+	var g := 0
+	for i in GRADES.size():
+		if total >= int(GRADES[i][0]):
+			g = i
+	return g
+
+
+static func grade_name(total: int) -> String:
+	return GRADES[grade_of(total)][1]
+
+
+## A mob fighter, tougher the deeper the term has gone.
+static func scale_mob(kind: String, depth: int, elite := false) -> Dictionary:
+	var m: Dictionary = (MOB_TYPES[kind] as Dictionary).duplicate()
+	var k := 1.0 + 0.09 * depth + (0.4 if elite else 0.0)
+	m["hp"] = float(m["hp"]) * k
+	m["armor"] = float(m["armor"]) + 0.12 * depth + (0.8 if elite else 0.0)
+	m["damage"] = float(m["damage"]) * (1.0 + 0.03 * depth + (0.2 if elite else 0.0))
+	m["parry"] = minf(float(m["parry"]) + 0.01 * depth, 0.7)
+	return m
+
+
+## A wave room: 2 to 4 fighters drawn from the mob types.
+static func mob_room(depth: int, reward: String, elite := false, place := "") -> Dictionary:
+	var kinds := MOB_TYPES.keys()
+	var count := 2 + (1 if depth >= 3 else 0) + (1 if depth >= 7 and not elite else 0)
+	if elite:
+		count = 2
+	kinds.shuffle()
+	var wave: Array = []
+	var names: Array = []
+	var seen := {}
+	for i in count:
+		var kind: String = kinds[i % kinds.size()]
+		var f := scale_mob(kind, depth, elite)
+		seen[kind] = int(seen.get(kind, 0)) + 1
+		wave.append(f)
+		names.append(f["name"])
+	var shout: Array = []
+	for f in wave:
+		for s in f["shout"]:
+			shout.append(String(f["name"]) + ": " + String(s))
+	if place == "":
+		place = DOOR_PLACES[randi() % DOOR_PLACES.size()]
+	var room := {
+		"id": "elite_mob" if elite else "mob", "reward": reward,
+		"kicker": ("정예 연전 · " if elite else "연전 · ") + String(PLACES[place]["name"]),
+		"name": (" · ").join(names),
+		"about": ("강화된 " if elite else "") + "%d명이 차례로 덤빕니다. 체력은 이어지니 아껴 싸우세요." % count,
+		"fighter": {}, "wave": wave, "rank": [0, 0], "place": place, "pre": [], "post": [],
+		"barks": {"start": shout, "retry": shout, "parried": ["윽!", "막았다고?!", "으악!"].map(func(s): return String(wave[0]["name"]) + ": " + s)},
+	}
+	return room
+
+
+static func rival_room(id: String, rank_to: int) -> Dictionary:
+	var r: Dictionary = (STAGES[RIVAL_INDEX[id]] as Dictionary).duplicate(true)
+	r["id"] = id
+	r["reward"] = "boon"
+	if rank_to > 0:
+		r["rank"] = [0, rank_to]
+	return r
+
+
+## What the doors out of a cleared room offer. One option means the way is fixed (a rival, the
+## war); otherwise 2 (3 at the top grade) rooms, each with the reward waiting in it.
+## `used` holds the rivals already met this term.
+static func next_options(depth: int, grade: int, used: Array) -> Array:
+	match depth:
+		0:
+			return [{"room": mob_room(0, "boon", false, "dusk")}]
+		2:
+			return [{"room": _pick_rival(used, 20)}]
+		5:
+			return [{"room": _pick_rival(used, 10)}]
+		8:
+			return [{"room": rival_room("kaiden", 1)}]
+		9:
+			return [{"room": rival_room("soldier", 0)}]
+		10:
+			return [{"room": rival_room("elite", 0)}]
+		11:
+			return [{"room": rival_room("baldor", 0)}]
+	var opts: Array = [
+		{"label": "기예의 문", "room": mob_room(depth, "boon")},
+		{"label": "수련의 문", "room": mob_room(depth, "train")},
+	]
+	if grade >= 1:
+		opts.append({"label": "정예의 문", "room": mob_room(depth, "rare", true)})
+		opts.append({"label": "휴식의 문", "rest": true})
+	opts.shuffle()
+	return opts.slice(0, 3 if grade >= 4 else 2)
+
+
+static func _pick_rival(used: Array, rank_to: int) -> Dictionary:
+	var pool := MID_RIVALS.filter(func(r): return not used.has(r))
+	var id: String = pool[randi() % pool.size()]
+	used.append(id)
+	return rival_room(id, rank_to)
+
+
+## The room at depth i of this term (the fixed list before a term has begun).
+static func stage(i: int) -> Dictionary:
+	return route[i] if i < route.size() else STAGES[mini(i, STAGES.size() - 1)]
+
+
 static func count() -> int:
-	return STAGES.size()
+	return ROUTE_LENGTH
 
 
 ## The full opponent dictionary for a stage: base numbers, then its own, then the card text.
 static func tier(i: int, k := 0) -> Dictionary:
-	var s: Dictionary = STAGES[i]
+	var s: Dictionary = stage(i)
 	var t: Dictionary = BASE.duplicate()
 	t.merge(s["fighter"], true)
 	if s.has("wave"):
@@ -174,17 +323,17 @@ static func tier(i: int, k := 0) -> Dictionary:
 
 ## The rank you hold after winning stage i.
 static func rank_after_win(i: int, current: int) -> int:
-	var band: Array = STAGES[i]["rank"]
+	var band: Array = stage(i)["rank"]
 	return band[1] if band[1] > 0 else current
 
 
 ## The rank after losing stage i: one place down each time, down to four below where the stage started.
 static func rank_after_loss(i: int, current: int) -> int:
-	var band: Array = STAGES[i]["rank"]
+	var band: Array = stage(i)["rank"]
 	if band[0] == 0:
 		return current
 	return mini(mini(current + 1, band[0] + 4), START_RANK)
 
 
 static func place_of(i: int) -> Dictionary:
-	return PLACES[STAGES[i].get("place", "dusk")]
+	return PLACES[stage(i).get("place", "dusk")]

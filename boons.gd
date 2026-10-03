@@ -81,8 +81,8 @@ static func get_boon(id: String) -> Dictionary:
 ## `n` boons the player doesn't have yet. When a school is chosen, at least two of the three
 ## come from it (so a build keeps getting fed), the rest from any school. `rare_only` offers
 ## only the strong ones (the reward for a duel of vengeance).
-static func roll(owned: Array, school := "", n := 3, rare_only := false) -> Array:
-	var pool := ALL.filter(func(b): return not owned.has(b["id"]) and (not rare_only or b.get("rare", false)))
+static func roll(owned: Array, school := "", n := 3, rare_only := false, allow_rare := true) -> Array:
+	var pool := ALL.filter(func(b): return not owned.has(b["id"]) and (not rare_only or b.get("rare", false)) and (rare_only or allow_rare or not b.get("rare", false)))
 	pool.shuffle()
 	var picked := []
 	if school != "":
