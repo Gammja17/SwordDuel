@@ -87,7 +87,8 @@ var _place := "dusk"          # the light and weather of the current duel (campa
 var _rain: Node
 var _torch_scale := 1.0
 var _scene_music := "calm"
-var _prefs := {"quality": 1 if OS.has_feature("web") else 2, "difficulty": 1, "hero": 0, "sens": 1.0, "text": 1.0, "fullscreen": false}
+var _prefs := {"quality": 0 if OS.has_feature("web") else 2, "difficulty": 1, "hero": 0, "sens": 1.0, "text": 1.0, "fullscreen": false}
+var _web_scale_cap := 1.0   # (browser only) what a very sharp screen allows
 var _war := false             # the courtyard is burning
 var _war_nodes: Array[Node] = []
 var _sun: DirectionalLight3D
@@ -1736,6 +1737,12 @@ func _apply_quality() -> void:
 	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 1 else Viewport.SCREEN_SPACE_AA_DISABLED
 	_sun.shadow_enabled = q >= 1
 	_sun.directional_shadow_max_distance = 20.0 if q == 1 else 30.0
+	if OS.has_feature("web"):
+		# The browser's graphics is the slowest place this runs: fewer shadow splits, a shorter
+		# shadow reach, and the 3D picture drawn smaller and stretched up.
+		_sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		_sun.directional_shadow_max_distance = 14.0 if q == 1 else 24.0
+		vp.scaling_3d_scale = minf([0.67, 0.8, 1.0][clampi(q, 0, 2)], _web_scale_cap)
 	_env.glow_enabled = q >= 2
 	# The fires and the rain depend on it.
 	if _war:
@@ -1852,7 +1859,8 @@ func _setup_web() -> void:
 	document.addEventListener("visibilitychange", _visibility_cb)
 	var dpr := float(JavaScriptBridge.eval("window.devicePixelRatio || 1", true))
 	if dpr > 2.0:
-		get_viewport().scaling_3d_scale = 2.0 / dpr
+		_web_scale_cap = 2.0 / dpr
+		_apply_quality()
 
 
 func _on_visibility_change(_args: Array) -> void:
