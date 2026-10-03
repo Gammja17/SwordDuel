@@ -17,8 +17,9 @@ const Campaign := preload("res://campaign.gd")
 const Scenes := preload("res://scenes.gd")
 const StoryScene := preload("res://story_scene.gd")
 const Boons := preload("res://boons.gd")
+const Schools := preload("res://schools.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, CREDITS }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -60,6 +61,10 @@ var _boons: Array = []        # ids of the learned techniques (saved)
 var _boon_offer: Array = []
 var _boon_next := 0
 var _boon_pending := 0
+var _school := ""             # the fighting style this run is built around (saved)
+var _boon_lvls := {}          # id -> level of trained techniques (saved)
+var _boon_pending_list: Array = []
+var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
 var _torch_scale := 1.0
@@ -183,6 +188,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif bk == KEY_4:
 			_take_boon(3)
 		return
+	if (_phase == Phase.SCHOOL or _phase == Phase.PATH) and event is InputEventKey and event.pressed and not event.is_echo():
+		var sk := (event as InputEventKey).physical_keycode
+		if sk >= KEY_1 and sk <= KEY_3:
+			if _phase == Phase.SCHOOL:
+				_pick_school(sk - KEY_1)
+			else:
+				_pick_path(sk - KEY_1)
+		return
+	if _phase == Phase.UPGRADE and event is InputEventKey and event.pressed and not event.is_echo():
+		var uk := (event as InputEventKey).physical_keycode
+		if uk >= KEY_1 and uk <= KEY_5:
+			_pick_upgrade(uk - KEY_1)
+		return
 	if _phase == Phase.BOON_DROP and event is InputEventKey and event.pressed and not event.is_echo():
 		var dk := (event as InputEventKey).physical_keycode
 		if dk >= KEY_1 and dk <= KEY_5:
@@ -221,10 +239,15 @@ func _advance() -> void:
 		Phase.INTRO:
 			_start_fight()
 		Phase.OUTCOME:
-			if _stats.get("won", false):
+			if _elite:
+				if _stats.get("won", false):
+					_boon_pick(_boon_next, true)
+				else:
+					_path_menu(_boon_next)
+			elif _stats.get("won", false):
 				var post: Array = Campaign.STAGES[_tier]["post"].duplicate()
 				if _tier + 1 < Campaign.count():
-					_run_scenes(post, _boon_pick.bind(_tier + 1))
+					_run_scenes(post, _path_menu.bind(_tier + 1))
 				elif _ending == "":
 					_choice()
 				else:
@@ -268,8 +291,17 @@ func _intro(tier: int) -> void:
 	var t: Dictionary = Campaign.tier(tier)
 	var d := _difficulty()
 	t["hp"] = float(t["hp"]) * float(d["hp"])
+	var elite_dmg := 1.0
+	if _elite:
+		# The rival you beat, come back stronger.
+		t["hp"] = float(t["hp"]) * 1.4
+		t["name"] = "복수전 · " + String(t["name"])
+		t["kicker"] = "정예 도전"
+		t["about"] = "한 번 졌던 상대가 힘을 길러 돌아왔습니다. 더 단단하고 더 아프게 칩니다."
+		t["parry"] = minf(float(t.get("parry", 0.0)) + 0.15, 0.9)
+		elite_dmg = 1.25
 	_spawn_duel(t)
-	_opponent.dmg_mult = float(d["dmg"])
+	_opponent.dmg_mult = float(d["dmg"]) * elite_dmg
 	_player.mods = _player_mods(tier)
 	_hud.set_status(_status_text())
 	var place: Dictionary = Campaign.place_of(tier)
@@ -332,6 +364,17 @@ func _outcome() -> void:
 		_totals[k] += _stats[k]
 	var t: Dictionary = Campaign.tier(_tier)
 	var name_: String = t["name"]
+	if _elite:
+		# A duel of vengeance: no rank, no progress; a win earns a rare technique.
+		if _stats["won"]:
+			_hud.show_card("정예 도전 성공", name_, name_ + _obj_particle(name_) + " 다시 꺾었습니다.\n\n" + _stats_line(_stats),
+				"클릭하면 강한 기예를 하나 고릅니다")
+		else:
+			_hud.show_card("정예 도전 실패", name_, name_ + "에게 졌습니다. 잃은 것은 없습니다.\n\n" + _stats_line(_stats),
+				"클릭하면 길로 돌아갑니다")
+		_click_ready_at = Time.get_ticks_msec() + 700
+		_set_fps()
+		return
 	if _stats["won"]:
 		var before := _rank
 		_rank = Campaign.rank_after_win(_tier, _rank)
@@ -409,8 +452,8 @@ func _credits() -> void:
 
 ## After a win: three techniques to learn, one is kept (or none). Only MAX_SLOTS fit, so
 ## a full set means pushing one out. Then on to the next duel.
-func _boon_pick(next_stage: int) -> void:
-	_boon_offer = Boons.roll(_boons)
+func _boon_pick(next_stage: int, rare_only := false) -> void:
+	_boon_offer = Boons.roll(_boons, _school, 3, rare_only)
 	if _boon_offer.is_empty():
 		_begin_stage(next_stage)
 		return
@@ -473,6 +516,7 @@ func _drop_boon(k: int) -> void:
 ## Learn offered boon `i`, forgetting the owned one at `forget` (-1: nothing to forget).
 func _learn(i: int, forget: int) -> void:
 	if forget >= 0:
+		_boon_lvls.erase(_boons[forget])
 		_boons.remove_at(forget)
 	_boons.append(_boon_offer[i]["id"])
 	_save_progress()
@@ -483,8 +527,95 @@ func _learn(i: int, forget: int) -> void:
 func _boon_names() -> String:
 	var names := []
 	for id in _boons:
-		names.append(Boons.get_boon(id).get("name", id))
+		names.append(Boons.get_boon(id).get("name", id) + ("+" if int(_boon_lvls.get(id, 1)) > 1 else ""))
 	return ", ".join(names)
+
+
+# --- 유파, 길, 수련, 정예 도전 -----------------------------------------------------------------
+
+## Before the first duel: choose the school this run is built around.
+func _school_menu(stage: int) -> void:
+	_phase = Phase.SCHOOL
+	_boon_next = stage
+	_clear_duel()
+	_title_cam.current = true
+	_hud.show_fight_ui(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var body := ""
+	for i in Schools.ORDER.size():
+		var s: Dictionary = Schools.ALL[Schools.ORDER[i]]
+		body += "%d  %s  ·  %s\n     %s\n     공명  %s\n\n" % [i + 1, s["name"], s["tag"], s["text"], s["res_text"]]
+	_hud.show_card("유파를 고르세요", "어떤 검으로 오를 것인가", body.strip_edges(),
+		"1, 2, 3 키로 고르세요   (한 판 동안 바꿀 수 없습니다)")
+	_set_fps()
+
+
+func _pick_school(i: int) -> void:
+	if i >= Schools.ORDER.size():
+		return
+	_school = Schools.ORDER[i]
+	_save_progress()
+	_hud.popup(Schools.ALL[_school]["name"], GOLD)
+	_begin_stage(_boon_next)
+
+
+## Between duels, a fork (like a map): learn a technique, train one you have, or take on a
+## stronger version of the rival you just beat for a rare one.
+func _path_menu(next_stage: int) -> void:
+	_phase = Phase.PATH
+	_boon_next = next_stage
+	_elite = false
+	_clear_duel()
+	_title_cam.current = true
+	_hud.show_fight_ui(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var rival: String = Campaign.STAGES[next_stage - 1]["name"]
+	var can_train := _trainable().size() > 0
+	var body := "1  배운다\n     스승에게 새 기예를 배웁니다. 셋 중 하나를 고릅니다.\n\n"
+	body += "2  수련한다" + ("" if can_train else "  (강화할 기예가 없습니다)") + "\n     익힌 기예 하나를 1.5배 강하게 만듭니다.\n\n"
+	body += "3  정예 도전\n     %s의 복수전 신청이 왔습니다. 더 강하지만 이기면 강한 기예를 하나 얻습니다. 져도 잃는 것은 없습니다." % rival
+	_hud.show_card("길을 고르세요", "석차 %d위 · 다음 상대 앞" % _rank, body, "1, 2, 3 키로 고르세요")
+	_set_fps()
+
+
+func _pick_path(i: int) -> void:
+	match i:
+		0:
+			_boon_pick(_boon_next)
+		1:
+			if _trainable().size() > 0:
+				_upgrade_menu()
+		2:
+			_elite = true
+			_intro(_boon_next - 1)
+
+
+func _trainable() -> Array:
+	return _boons.filter(func(id): return int(_boon_lvls.get(id, 1)) < Boons.MAX_LEVEL)
+
+
+func _upgrade_menu() -> void:
+	_phase = Phase.UPGRADE
+	_boon_pending_list = _trainable()
+	var body := ""
+	for k in _boon_pending_list.size():
+		var b := Boons.get_boon(_boon_pending_list[k])
+		body += "%d  %s\n     %s\n\n" % [k + 1, b["name"], b["text"]]
+	body += "5  돌아간다"
+	_hud.show_card("수련", "어느 기예를 단련할까요", body, "키로 고르세요   (효과가 1.5배가 됩니다)")
+
+
+func _pick_upgrade(k: int) -> void:
+	if k == 4:
+		_path_menu(_boon_next)
+		return
+	if k >= _boon_pending_list.size():
+		return
+	var id: String = _boon_pending_list[k]
+	_boon_lvls[id] = int(_boon_lvls.get(id, 1)) + 1
+	_save_progress()
+	_hud.popup(Boons.get_boon(id)["name"] + " 강화", GOLD)
+	_begin_stage(_boon_next)
 
 
 # --- story: stages and cutscenes ------------------------------------------------------
@@ -495,11 +626,17 @@ func _reset_campaign() -> void:
 	_ending = ""
 	_flags = {}
 	_boons = []
+	_boon_lvls = {}
+	_school = ""
 	_save_progress()
 
 
 ## Cutscenes before the duel, then the duel's card.
 func _begin_stage(i: int) -> void:
+	_elite = false
+	if _school == "":
+		_school_menu(i)
+		return
 	_tier = i
 	_set_place(Campaign.STAGES[i].get("place", "dusk"))
 	_set_war(bool(Campaign.STAGES[i].get("war", false)))
@@ -865,6 +1002,8 @@ func _load_progress() -> void:
 		_ending = String(cfg.get_value("progress", "ending", ""))
 		_flags = cfg.get_value("progress", "flags", {})
 		_boons = cfg.get_value("progress", "boons", [])
+		_boon_lvls = cfg.get_value("progress", "boon_lvls", {})
+		_school = String(cfg.get_value("progress", "school", ""))
 		for k in _prefs:
 			_prefs[k] = cfg.get_value("prefs", k, _prefs[k])
 		for bus in _volumes:
@@ -880,6 +1019,8 @@ func _save_progress() -> void:
 	cfg.set_value("progress", "ending", _ending)
 	cfg.set_value("progress", "flags", _flags)
 	cfg.set_value("progress", "boons", _boons)
+	cfg.set_value("progress", "boon_lvls", _boon_lvls)
+	cfg.set_value("progress", "school", _school)
 	for k in _prefs:
 		cfg.set_value("prefs", k, _prefs[k])
 	for bus in _volumes:
@@ -1055,15 +1196,19 @@ func _make_rain() -> void:
 
 ## The player's effects for this duel: boons plus what the weather does to them.
 func _player_mods(stage: int) -> Dictionary:
-	var m := Boons.mods_of(_boons)
-	var pm: Dictionary = Campaign.place_of(stage).get("mods", {})
-	for k in pm:
-		m[k] = float(m.get(k, 0.0)) + float(pm[k])
+	var m := Boons.mods_of(_boons, _boon_lvls)
+	var school := Schools.mods_for(_school, Boons.count_school(_boons, _school))
+	for src in [school, Campaign.place_of(stage).get("mods", {})]:
+		for k in src:
+			m[k] = float(m.get(k, 0.0)) + float(src[k])
 	return m
 
 
 func _status_text() -> String:
-	var s := "석차 %d위" % _rank
+	var s := ""
+	if _school != "":
+		s = Schools.ALL[_school]["name"] + "   ·   "
+	s += "석차 %d위" % _rank
 	if not _boons.is_empty():
 		s += "   ·   " + _boon_names()
 	return s

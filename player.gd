@@ -509,6 +509,7 @@ func _physics_process(delta: float) -> void:
 	var local := input_dir.normalized()
 	local.x *= STRAFE_SPEED
 	local.z *= SPEED if local.z < 0.0 else BACK_SPEED
+	local *= maxf(0.4, 1.0 + mod("move_speed"))
 	if _cut_t >= 0.0 and _cut_t < _swing_end() and input_dir.z <= 0.0:
 		local.z -= CUT_STEP * (1.0 - _cut_t / _swing_end())   # step into the cut
 	var move := global_transform.basis * local
@@ -738,7 +739,7 @@ func _blend(a: Array, b: Array, t: float) -> Array:
 ## Where the cut has the blade now, and how far the view turns with it.
 func _cut_pose(delta: float, held: Array) -> Array:
 	_cut_drag -= delta
-	_cut_t += delta * (0.25 if _cut_drag > 0.0 else 1.0)
+	_cut_t += delta * (0.25 if _cut_drag > 0.0 else 1.0) * maxf(0.4, 1.0 + mod("swing_speed"))
 	var t := _cut_t
 	var twist_from := sin(deg_to_rad(CUT_FROM))
 	var out: Array
