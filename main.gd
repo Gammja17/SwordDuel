@@ -18,6 +18,8 @@ const Scenes := preload("res://scenes.gd")
 const StoryScene := preload("res://story_scene.gd")
 const Boons := preload("res://boons.gd")
 const Schools := preload("res://schools.gd")
+const HubPlayerScript := preload("res://hub_player.gd")
+const HubNpcScript := preload("res://hub_npc.gd")
 
 enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
 
@@ -70,6 +72,10 @@ var _seen := {}               # cutscenes already shown: they play once (saved)
 var _wave_idx := 0           # which fighter of a wave room is up
 var _hp_mult := 1.0
 var _dmg_mult := 1.0
+var _hub_player: CharacterBody3D
+var _hub_nodes: Array[Node] = []
+var _hub_spots: Array = []
+var _hub_near := {}
 var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
@@ -141,6 +147,8 @@ func _process(delta: float) -> void:
 		_torches[i].light_energy = _torch_scale * (1.3 + sin(Time.get_ticks_msec() * 0.011 + i * 1.7) * 0.12 + randf_range(-0.08, 0.08))
 
 	match _phase:
+		Phase.HUB:
+			_hub_tick()
 		Phase.TITLE:
 			_title_angle += delta * 0.06
 			_title_cam.position = Vector3(sin(_title_angle) * 7.0, 2.3, cos(_title_angle) * 7.0)
@@ -184,9 +192,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_to_title()
 		return
 	if _phase == Phase.HUB and event is InputEventKey and event.pressed and not event.is_echo():
-		var hk := (event as InputEventKey).physical_keycode
-		if hk >= KEY_1 and hk <= KEY_3:
-			_pick_hub(hk - KEY_1)
+		if (event as InputEventKey).physical_keycode == KEY_E:
+			_hub_interact()
 		return
 	if _phase == Phase.HUB_TRAIN and event is InputEventKey and event.pressed and not event.is_echo():
 		var tk := (event as InputEventKey).physical_keycode
@@ -689,25 +696,133 @@ func _pick_upgrade(k: int) -> void:
 
 ## The dormitory: where every run starts and ends. Start a term, train for good with the
 ## points earned, or talk (what is said depends on how far you have got).
+## The dormitory yard, walked about in first person. The gate starts a term, the board is the
+## training hall, and whoever stands about can be talked to (E). More people turn up as you
+## get further.
 func _to_hub() -> void:
 	_phase = Phase.HUB
 	_elite = false
-	_clear_duel()
-	_set_war(false)
-	_set_place("dusk")
-	_title_cam.current = true
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_hud.hide_card()
 	_hud.show_fight_ui(false)
-	_hud.clear_hint()
 	_hud.clear_task()
 	_hud.hide_bind()
+	if not is_instance_valid(_hub_player):
+		_clear_duel()
+		_set_war(false)
+		_set_place("dusk")
+		_build_hub()
+		_hud.hint("WASD 이동 · 마우스로 시점 · E 로 말을 걸거나 고릅니다", 6.0)
+	_hub_player.enabled = true
+	_hub_player.cam.current = true
+	_capture_mouse()
+	_set_fps()
+
+
+func _build_hub() -> void:
+	_hub_player = HubPlayerScript.new()
+	_hub_player.name = "HubPlayer"
+	add_child(_hub_player)
+	_hub_player.position = Vector3(0.0, 0.0, 5.5)
+	_hub_nodes.append(_hub_player)
+	_hub_spots = []
 	var best := int(_meta.get("best_stage", 0))
-	var top := "최고 기록: %d번째 상대까지" % best if best > 0 else "아직 첫 결투도 이기지 못했습니다"
-	var body := "1  학기를 시작한다\n     꼴찌에서 다시 올라갑니다. 기예와 유파는 새로 고릅니다.\n\n"
-	body += "2  훈련장\n     수련 점수로 영구히 강해집니다.\n\n"
-	body += "3  이야기를 나눈다\n\n"
-	body += "수련 점수 %d     %d번째 학기     %s" % [int(_meta.get("pts", 0)), int(_meta.get("runs", 0)) + 1, top]
-	_hud.show_card("기숙사", "공훈생 숙소", body, "1, 2, 3 키로 고르세요")
+	# id, name, outfit, where, how far you must have got to meet them
+	for c in [["doyun", "도윤", "squire", Vector3(-4.3, 0.0, -4.2), 0], ["mujin", "무진", "master", Vector3(4.6, 0.0, -4.0), 0],
+			["taesan", "태산", "taesan", Vector3(5.7, 0.0, 2.0), 1], ["leon", "레온", "leon", Vector3(-2.4, 0.0, -6.0), 3],
+			["seohyuk", "서혁", "knight", Vector3(-5.8, 0.0, -0.5), 4], ["serafin", "세라핀", "woman_ranger", Vector3(2.6, 0.0, -6.0), 6],
+			["kaiden", "카이든", "kaiden", Vector3(0.0, 0.0, -2.6), 7]]:
+		if best < int(c[4]):
+			continue
+		var npc := HubNpcScript.new()
+		npc.position = c[3]
+		add_child(npc)
+		npc.setup(c[0], c[1], c[2], _hub_player)
+		_hub_nodes.append(npc)
+		_hub_spots.append({"id": c[0], "pos": c[3], "r": 2.3, "prompt": c[1] + "에게 말을 건다"})
+	# The training board.
+	var board_at := Vector3(-6.0, 0.0, 2.6)
+	_hub_nodes.append(Armor.part(self, Armor.box(Vector3(0.12, 2.1, 0.12)), Armor.wood(), board_at + Vector3(0.0, 1.05, 0.0)))
+	_hub_nodes.append(Armor.part(self, Armor.box(Vector3(1.5, 1.0, 0.08)), Armor.wood(), board_at + Vector3(0.0, 1.7, 0.0)))
+	_hub_nodes.append(_hub_label("훈련장", board_at + Vector3(0.0, 1.7, 0.08), 40))
+	_hub_spots.append({"id": "board", "pos": board_at, "r": 2.2, "prompt": "훈련장을 연다"})
+	# The gate.
+	_hub_nodes.append(_hub_label("정문  ·  학기 시작", Vector3(0.0, 3.0, -7.2), 52))
+	_hub_spots.append({"id": "gate", "pos": Vector3(0.0, 0.0, -6.3), "r": 2.6, "prompt": "정문으로 나가 학기를 시작한다"})
+
+
+func _hub_label(text: String, at: Vector3, size: int) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font = load("res://assets/fonts/NanumMyeongjo-ExtraBold.ttf")
+	l.font_size = size
+	l.pixel_size = 0.005
+	l.outline_size = 14
+	l.modulate = Color(0.98, 0.9, 0.62)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.position = at
+	add_child(l)
+	return l
+
+
+func _free_hub() -> void:
+	for n in _hub_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	_hub_nodes.clear()
+	_hub_spots.clear()
+	_hub_near = {}
+	_hub_player = null
+
+
+func _hub_tick() -> void:
+	if not is_instance_valid(_hub_player):
+		return
+	var near := {}
+	var best := 1.0e9
+	var me := _hub_player.global_position
+	for s in _hub_spots:
+		var d := Vector2(me.x - s["pos"].x, me.z - s["pos"].z).length()
+		if d < float(s["r"]) and d < best:
+			best = d
+			near = s
+	_hub_near = near
+	_hud.set_prompt(("E  " + near["prompt"]) if not near.is_empty() and _hub_player.enabled else "")
+	# The mouse lock dropped (ESC, or the browser took it): open the settings.
+	if auto_pause and _hub_player.enabled and not _menu_open and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED \
+			and Time.get_ticks_msec() - _captured_at > 400:
+		_open_menu(false)
+
+
+func _hub_interact() -> void:
+	if _hub_near.is_empty() or not is_instance_valid(_hub_player) or not _hub_player.enabled:
+		return
+	var id: String = _hub_near["id"]
+	_hub_player.enabled = false
+	_hud.set_prompt("")
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	match id:
+		"gate":
+			_start_run()
+		"board":
+			_show_training()
+		_:
+			_hub_talk(id)
+
+
+func _hub_talk(who: String) -> void:
+	_phase = Phase.HUB_TALK
+	var name_: String = Scenes.NAMES.get(who, who)
+	var best := int(_meta.get("best_stage", 0))
+	var pool: Array = []
+	for t in Campaign.HUB_TALKS:
+		if t["who"] == name_ and best >= int(t["min"]) and (not t.has("flag") or int(_flags.get(t["flag"], 0)) == int(t["val"])):
+			pool.append(t)
+	var text := "(눈이 마주쳤지만 딱히 할 말이 없는 듯하다.)"
+	if not pool.is_empty():
+		text = pool[randi() % pool.size()]["text"]
+	_hud.show_card("기숙사 마당", name_, text, "클릭하면 돌아갑니다")
+	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
 
 
@@ -718,7 +833,7 @@ func _pick_hub(i: int) -> void:
 		1:
 			_show_training()
 		2:
-			_hub_talk()
+			_hub_talk("doyun")
 
 
 func _start_run() -> void:
@@ -794,19 +909,6 @@ func _meta_mods() -> Dictionary:
 		for k in u.get("mods", {}):
 			m[k] = float(m.get(k, 0.0)) + float(u["mods"][k]) * lvl
 	return m
-
-
-func _hub_talk() -> void:
-	_phase = Phase.HUB_TALK
-	var best := int(_meta.get("best_stage", 0))
-	var pool: Array = []
-	for t in Campaign.HUB_TALKS:
-		if best >= int(t["min"]) and (not t.has("flag") or int(_flags.get(t["flag"], 0)) == int(t["val"])):
-			pool.append(t)
-	var t: Dictionary = pool[randi() % pool.size()] if not pool.is_empty() else Campaign.HUB_TALKS[0]
-	_hud.show_card("기숙사 마당", t["who"], t["text"], "클릭하면 돌아갑니다")
-	_click_ready_at = Time.get_ticks_msec() + 300
-	_set_fps()
 
 
 # --- story: stages and cutscenes ------------------------------------------------------
@@ -927,6 +1029,7 @@ func _spawn_opponent(tier: Dictionary) -> void:
 
 
 func _clear_duel() -> void:
+	_free_hub()
 	_hud.set_prompt("")
 	Engine.time_scale = 1.0
 	for n in [_player, _opponent, _combat]:
@@ -1239,7 +1342,7 @@ func _save_progress() -> void:
 ## 60 fps while fighting, 30 on the cards between fights. (Called on every phase
 ## change, so it also shows the settings button on card screens.)
 func _set_fps() -> void:
-	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE
+	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE or _phase == Phase.HUB
 	Engine.max_fps = 60 if fighting else 30
 	_hud.show_settings_button(not fighting and not _menu_open)
 	_update_music()
@@ -1286,7 +1389,7 @@ func _close_menu(to_title: bool) -> void:
 	_menu_open = false
 	_hud.hide_settings()
 	_save_progress()
-	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE
+	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE or _phase == Phase.HUB
 	get_tree().paused = false
 	if to_title:
 		_to_title()
