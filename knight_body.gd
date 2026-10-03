@@ -188,15 +188,21 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 
 	# Head: great helm with eye slit, breathing holes and a reinforcing cross.
 	var head := _attach("Head")
-	var helm := Armor.part(head, Armor.lathe(PackedVector2Array(HELM), 24), _steel, Vector3(0, -0.04, 0))
-	helm.scale = Vector3(1.0, 1.0, 0.96)
-	Armor.part(head, Armor.box(Vector3(0.20, 0.017, 0.03)), Armor.visor_black(), Vector3(0, 0.121, 0.122))
-	Armor.part(head, Armor.box(Vector3(0.022, 0.20, 0.018)), _steel, Vector3(0, 0.06, 0.131))
-	for hx in [-0.05, -0.03, 0.03, 0.05]:
-		for hy in [0.03, 0.005]:
-			Armor.part(head, Armor.box(Vector3(0.008, 0.008, 0.02)), Armor.visor_black(), Vector3(hx, hy, 0.126))
-	if crest:
-		Armor.part(head, Armor.box(Vector3(0.018, 0.06, 0.24)), Armor.cloth(Color(0.55, 0.12, 0.10)), Vector3(0, 0.255, -0.02))
+	# A modelled helmet and cape (KayKit Knight, CC0) when the pack is there; the built-up
+	# great helm below is the fallback.
+	var use_kay := _kay_piece("Knight_Helmet", "Head", Vector3(0.0, -0.02, 0.0), Vector3.ZERO, Vector3.ONE * 0.19, _steel) != null
+	if use_kay:
+		_kay_piece("Knight_Cape", "Chest", Vector3(0.0, 0.12, -0.03), Vector3.ZERO, Vector3(0.48, 0.78, 0.48), cloth)
+	else:
+		var helm := Armor.part(head, Armor.lathe(PackedVector2Array(HELM), 24), _steel, Vector3(0, -0.04, 0))
+		helm.scale = Vector3(1.0, 1.0, 0.96)
+		Armor.part(head, Armor.box(Vector3(0.20, 0.017, 0.03)), Armor.visor_black(), Vector3(0, 0.121, 0.122))
+		Armor.part(head, Armor.box(Vector3(0.022, 0.20, 0.018)), _steel, Vector3(0, 0.06, 0.131))
+		for hx in [-0.05, -0.03, 0.03, 0.05]:
+			for hy in [0.03, 0.005]:
+				Armor.part(head, Armor.box(Vector3(0.008, 0.008, 0.02)), Armor.visor_black(), Vector3(hx, hy, 0.126))
+		if crest:
+			Armor.part(head, Armor.box(Vector3(0.018, 0.06, 0.24)), Armor.cloth(Color(0.55, 0.12, 0.10)), Vector3(0, 0.255, -0.02))
 
 	# Torso: breastplate under a cloth coat, a belt, and a skirt of plates below.
 	var chest := _attach("Chest")
@@ -215,8 +221,8 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 	# Arms: pauldrons, vambraces, gauntlets. Leg plates, knees and sabatons.
 	for side in ["Left", "Right"]:
 		var upper := _attach(side + "UpperArm")
-		var pauldron := Armor.part(upper, Armor.sphere(0.118), _steel, Vector3(0, 0.03, 0))
-		pauldron.scale = Vector3(1.1, 1.05, 1.1)
+		var pauldron := Armor.part(upper, Armor.sphere(0.092), _steel, Vector3(0, 0.035, 0))
+		pauldron.scale = Vector3(1.15, 0.8, 1.1)
 		_plates.append(pauldron)
 		_limb(side + "LowerArm", side + "Hand", 0.046, _steel)
 		var hand := _attach(side + "Hand")
@@ -351,6 +357,32 @@ static func _only_on_bones(mesh: Mesh, skin: Skin, bones: Array) -> ArrayMesh:
 
 
 ## A BoneAttachment3D following the named bone (one per bone, reused).
+const KAY_SCENE := "res://assets/characters/knight/Knight.glb"
+static var _kay_scene: PackedScene
+
+
+## A piece of the KayKit knight (helmet, cape, shield ...) put on one of our bones.
+func _kay_piece(piece: String, bone: String, pos: Vector3, rot_deg: Vector3, scale: Vector3, mat: Material = null) -> Node3D:
+	if not ResourceLoader.exists(KAY_SCENE):
+		return null
+	if _kay_scene == null:
+		_kay_scene = load(KAY_SCENE)
+	var src := _kay_scene.instantiate()
+	var found := src.find_child(piece, true, false) as MeshInstance3D
+	var mi: MeshInstance3D = null
+	if found != null:
+		mi = MeshInstance3D.new()
+		mi.mesh = found.mesh
+		if mat != null:
+			mi.material_override = mat
+		_attach(bone).add_child(mi)
+		mi.position = pos
+		mi.rotation_degrees = rot_deg
+		mi.scale = scale
+	src.free()
+	return mi
+
+
 func _attach(bone: String) -> Node3D:
 	var existing := skeleton.get_node_or_null("attach_" + bone)
 	if existing:
