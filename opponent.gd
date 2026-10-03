@@ -127,6 +127,7 @@ func setup(player: Node3D, tier: Dictionary) -> void:
 	hp = max_hp
 	display_name = String(tier.get("name", ""))
 	_body.build(tier.get("tabard", Color(0.3, 0.3, 0.45)), bool(tier.get("crest", false)), String(tier.get("outfit", "")))
+	_body.set_kit(String(tier.get("kit", "two")))
 	_pose = SwordPoses.make("guard")
 	_sword_to(_pose, 0.01)
 	_update_sword(0.0)

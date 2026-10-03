@@ -142,6 +142,7 @@ var _right_ik: SkeletonModifier3D
 var _left_on_sword: Node3D
 var _grab_node: Node3D     # where the left hand grips someone, when it lets go of the sword
 var _two_hands := 1.0
+var _kit := "two"
 
 
 func build(tabard_color: Color, crest: bool, outfit := "") -> void:
@@ -357,6 +358,8 @@ static func _only_on_bones(mesh: Mesh, skin: Skin, bones: Array) -> ArrayMesh:
 
 
 ## A BoneAttachment3D following the named bone (one per bone, reused).
+const SHIELD_POS := Vector3(0.0, 0.14, 0.12)
+const SHIELD_ROT := Vector3(0.0, 90.0, 0.0)
 const KAY_SCENE := "res://assets/characters/knight/Knight.glb"
 static var _kay_scene: PackedScene
 
@@ -564,6 +567,16 @@ func act(clip: String, from: float, to: float, duration: float, fade := 0.1) -> 
 
 ## Standing at ease: the free left hand hangs open instead of reaching for the sword's grip
 ## (the sword is held low in the right hand), and the body is held still.
+## How the fighter carries a sword: "two" (both hands on a long grip), "one" (one hand, the
+## other free), "shield" (one hand, and a shield on the other arm).
+func set_kit(kind: String) -> void:
+	_kit = kind
+	if kind == "one" or kind == "shield":
+		_two_hands = 0.0
+	if kind == "shield":
+		_kay_piece("Round_Shield", "LeftLowerArm", SHIELD_POS, SHIELD_ROT, Vector3.ONE * 0.68, Armor.two_sided(Armor.steel()))
+
+
 func at_ease() -> void:
 	_two_hands = 0.0
 	_grip_hands.open_left = true

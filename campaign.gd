@@ -44,7 +44,7 @@ const STAGES := [
 		"about": "같은 공훈생. 느리고 크게 휘두르지만 칼이 맞물리면 힘이 셉니다.",
 		"fighter": {"hp": 80.0, "windup": 0.58, "attack": 0.27, "recover": 0.7, "poise": Vector2(0.9, 1.6),
 			"lines": ["c", "a"], "dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.1, "parry": 0.15,
-			"bind_press": 0.5, "bind_strength": 0.95, "armor": 1.0, "speed": 2.3, "outfit": "taesan"},
+			"bind_press": 0.5, "bind_strength": 0.95, "armor": 1.0, "speed": 2.3, "outfit": "taesan", "kit": "two"},
 		"place": "dusk", "rank": [30, 25], "barks": {"start": ["태산: 덤벼라, 꼴찌.", "태산: 한 칸이 제일 비싸다."], "retry": ["태산: 또 왔나. 끈질기군.", "태산: 쓰러진 자리에서 일어나는 건 인정하지."], "parried": ["태산: ……제법인데.", "태산: 이 맛이군."]},
 		"pre": ["taesan_pre"], "post": ["taesan_post"]},
 	# --- 연전: a room of weak fighters taken one after another. Health carries over. ---
@@ -63,12 +63,12 @@ const STAGES := [
 	{"kicker": "순위전 · 25위 → 18위", "name": "하급 귀족 레온",
 		"about": "속임수를 많이 씁니다. 치켜든 쪽을 바꾸고, 쳐내기를 자주 시도합니다.",
 		"fighter": {"hp": 80.0, "windup": 0.42, "attack": 0.21, "feint": 0.6, "parry": 0.4, "dodge": 0.2,
-			"lines": ["a", "b"], "poise": Vector2(0.4, 1.0), "speed": 2.7, "armor": 1.0, "outfit": "leon"},
+			"lines": ["a", "b"], "poise": Vector2(0.4, 1.0), "speed": 2.7, "armor": 1.0, "outfit": "leon", "kit": "one"},
 		"place": "dawn", "rank": [25, 18], "barks": {"start": ["레온: 규칙대로! 규칙대로!", "레온: 사, 살살 부탁해!"], "retry": ["레온: 또 이겨 줄게!", "레온: 이번엔 진짜 이길 수도 있어!"], "parried": ["레온: 아악, 그건 반칙!", "레온: 알고 있었어! 일부러야!"]},
 		"pre": ["leon_pre"], "post": ["leon_post"]},
 	{"kicker": "순위전 · 18위 → 10위", "name": "기사 서혁",
 		"about": "좌우로 번갈아 베고, 가끔 치켜든 쪽을 바꿔 속입니다. 함부로 휘두르면 받아칩니다.",
-		"fighter": {"outfit": "knight"},
+		"fighter": {"outfit": "knight", "kit": "shield"},
 		"place": "rain", "rank": [18, 10], "barks": {"start": ["서혁: 정정당당히.", "서혁: 빗길을 조심하게."], "retry": ["서혁: 다시 서게. 예를 갖추겠네.", "서혁: 졌다고 부끄러워 말게."], "parried": ["서혁: ……좋은 수다.", "서혁: 읽혔군."]},
 		"pre": ["seohyuk_pre"], "post": ["seohyuk_post"]},
 	{"kicker": "연전 · 귀족가 호위병", "name": "귀족가 호위병 둘",
@@ -84,7 +84,7 @@ const STAGES := [
 	{"kicker": "순위전 · 10위 → 3위", "name": "대귀족 영애 세라핀",
 		"about": "빠르고 정확합니다. 찌르기로 거리를 깨고 들어오며, 물러나면 쫓아옵니다.",
 		"fighter": {"hp": 95.0, "windup": 0.40, "attack": 0.19, "lines": ["lunge", "a", "b"], "dodge": 0.3,
-			"parry": 0.35, "combo": 0.3, "speed": 3.0, "armor": 1.5, "outfit": "woman_ranger"},
+			"parry": 0.35, "combo": 0.3, "speed": 3.0, "armor": 1.5, "outfit": "woman_ranger", "kit": "one"},
 		"place": "night", "rank": [10, 3], "barks": {"start": ["세라핀: 숨 쉴 틈은 없을 거야.", "세라핀: 지켜보는 눈이 많아."], "retry": ["세라핀: 또? 질기네.", "세라핀: 같은 실수는 두 번 안 봐줘."], "parried": ["세라핀: 흥, 우연이야.", "세라핀: ……제법."]},
 		"pre": ["serafin_pre"], "post": ["serafin_post"]},
 	{"kicker": "순위전 · 3위 → 1위", "name": "공작가 공자 카이든",
@@ -93,12 +93,12 @@ const STAGES := [
 			"poise": Vector2(0.45, 1.0), "attack_prob": 0.8, "lines": ["a", "b", "c", "lunge"], "dodge": 0.25,
 			"parry_window": 0.14, "windup_jitter": 0.2, "feint": 0.35, "combo": 0.35, "punish": 0.7, "riposte": 0.5,
 			"damage": 0.72, "armor": 3.0, "flinch_speed": 11.0, "parry": 0.45, "bind_press": 0.5, "bind_strength": 0.8,
-			"bind_switch": Vector2(1.3, 2.2), "exit_cut": 0.7, "guard_track": 12.0, "speed": 2.8, "outfit": "kaiden"},
+			"bind_switch": Vector2(1.3, 2.2), "exit_cut": 0.7, "guard_track": 12.0, "speed": 2.8, "outfit": "kaiden", "kit": "two"},
 		"place": "overcast", "rank": [3, 1], "barks": {"start": ["카이든: 수석은 내 것이다.", "카이든: 무릎 꿇을 준비는 됐나."], "retry": ["카이든: 또 쓰러지러 왔나.", "카이든: 평민의 끈기는 인정하지."], "parried": ["카이든: 이럴 리가!", "카이든: 우연이다!"]},
 		"pre": ["kaiden_pre"], "post": ["kaiden_post"]},
 	{"kicker": "전쟁 · 북문", "name": "북방 병사",
 		"about": "북방군 병사입니다. 갑옷이 단단해 얕게 베어서는 통하지 않습니다.",
-		"fighter": {"hp": 90.0, "armor": 3.5, "lines": ["a", "b", "c"], "feint": 0.1, "outfit": "",
+		"fighter": {"hp": 90.0, "armor": 3.5, "lines": ["a", "b", "c"], "feint": 0.1, "outfit": "", "kit": "shield",
 			"tabard": Color(0.12, 0.14, 0.30)},
 		"rank": [0, 0], "barks": {"start": ["북방 병사: 학생이잖아!", "북방 병사: 한 놈 더다!"], "retry": ["북방 병사: 또 일어났다!", "북방 병사: 끈질긴 애송이!"], "parried": ["북방 병사: 윽!", "북방 병사: 막았다고?"]},
 		"pre": ["war_bell"], "post": [], "place": "war", "war": true},
@@ -226,22 +226,22 @@ const DOOR_PLACES := ["dusk", "dawn", "rain", "night", "overcast", "village", "h
 
 # The fighters of the wave rooms. Numbers grow with depth (scale_mob).
 const MOB_TYPES := {
-	"recruit": {"name": "연습병", "hp": 36.0, "windup": 0.56, "attack": 0.24, "recover": 0.6, "poise": Vector2(0.8, 1.5), "lines": ["c"],
+	"recruit": {"name": "연습병", "kit": "one", "hp": 36.0, "windup": 0.56, "attack": 0.24, "recover": 0.6, "poise": Vector2(0.8, 1.5), "lines": ["c"],
 		"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.0, "parry": 0.0, "punish": 0.1, "damage": 0.5, "armor": 0.3, "speed": 2.3, "outfit": "recruit",
 		"shout": ["차례로 간다!", "꼴찌는 우리 몫이지!"]},
-	"spear": {"name": "창병", "hp": 44.0, "windup": 0.6, "attack": 0.22, "recover": 0.62, "poise": Vector2(0.7, 1.4), "lines": ["lunge"],
+	"spear": {"name": "창병", "kit": "two", "hp": 44.0, "windup": 0.6, "attack": 0.22, "recover": 0.62, "poise": Vector2(0.7, 1.4), "lines": ["lunge"],
 		"dodge": 0.1, "feint": 0.0, "combo": 0.0, "riposte": 0.1, "parry": 0.1, "punish": 0.3, "damage": 0.6, "armor": 0.6, "speed": 2.5, "outfit": "recruit",
 		"shout": ["찌른다!", "거리를 지켜라!"]},
-	"shield": {"name": "방패병", "hp": 62.0, "windup": 0.55, "attack": 0.26, "recover": 0.5, "poise": Vector2(0.6, 1.2), "lines": ["c"],
+	"shield": {"name": "방패병", "kit": "shield", "hp": 62.0, "windup": 0.55, "attack": 0.26, "recover": 0.5, "poise": Vector2(0.6, 1.2), "lines": ["c"],
 		"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.3, "parry": 0.45, "punish": 0.3, "damage": 0.6, "armor": 2.4, "speed": 2.2, "outfit": "guard",
 		"shout": ["뚫어 보시지!", "쳐내는 건 내 몫이다."]},
-	"swift": {"name": "쾌검 신입", "hp": 34.0, "windup": 0.36, "attack": 0.17, "recover": 0.45, "poise": Vector2(0.4, 0.9), "lines": ["a", "b"],
+	"swift": {"name": "쾌검 신입", "kit": "one", "hp": 34.0, "windup": 0.36, "attack": 0.17, "recover": 0.45, "poise": Vector2(0.4, 0.9), "lines": ["a", "b"],
 		"dodge": 0.3, "feint": 0.2, "combo": 0.25, "riposte": 0.1, "parry": 0.05, "punish": 0.3, "damage": 0.5, "armor": 0.3, "speed": 3.0, "outfit": "leon",
 		"shout": ["빠르다고 소문났지!", "잡아 봐!"]},
-	"brute": {"name": "힘센 신입", "hp": 72.0, "windup": 0.64, "attack": 0.28, "recover": 0.7, "poise": Vector2(0.9, 1.6), "lines": ["c", "a"],
+	"brute": {"name": "힘센 신입", "kit": "two", "hp": 72.0, "windup": 0.64, "attack": 0.28, "recover": 0.7, "poise": Vector2(0.9, 1.6), "lines": ["c", "a"],
 		"dodge": 0.0, "feint": 0.0, "combo": 0.0, "riposte": 0.0, "parry": 0.1, "punish": 0.2, "damage": 0.85, "armor": 1.0, "speed": 2.2, "outfit": "taesan",
 		"bind_press": 0.5, "bind_strength": 0.95, "shout": ["으랏차!", "한 방이면 된다!"]},
-	"guard": {"name": "호위병", "hp": 58.0, "windup": 0.44, "attack": 0.21, "recover": 0.5, "poise": Vector2(0.5, 1.0), "lines": ["a", "b", "c"],
+	"guard": {"name": "호위병", "kit": "shield", "hp": 58.0, "windup": 0.44, "attack": 0.21, "recover": 0.5, "poise": Vector2(0.5, 1.0), "lines": ["a", "b", "c"],
 		"dodge": 0.1, "feint": 0.15, "combo": 0.15, "riposte": 0.25, "parry": 0.2, "punish": 0.4, "damage": 0.6, "armor": 1.6, "speed": 2.6, "outfit": "guard",
 		"shout": ["도련님께 가까이 오지 마라.", "평민은 비켜라."]},
 }
@@ -379,6 +379,17 @@ static func tier(i: int, k := 0) -> Dictionary:
 	t.merge(s["fighter"], true)
 	if s.has("wave"):
 		t.merge(s["wave"][k], true)   # a wave room: the k-th fighter
+	match String(t.get("kit", "two")):
+		"shield":   # slower, harder to get through
+			t["armor"] = float(t["armor"]) + 1.0
+			t["parry"] = minf(float(t["parry"]) + 0.15, 0.9)
+			t["speed"] = float(t["speed"]) - 0.2
+		"one":      # quicker and lighter on its feet
+			t["windup"] = float(t["windup"]) * 0.9
+			t["speed"] = float(t["speed"]) + 0.2
+			t["armor"] = maxf(float(t["armor"]) - 0.3, 0.0)
+		_:          # two hands: heavier blows
+			t["damage"] = float(t["damage"]) * 1.08
 	t["kicker"] = s["kicker"]
 	t["name"] = (s["name"] as String) if not s.has("wave") else String(s["wave"][k]["name"])
 	t["about"] = s["about"]

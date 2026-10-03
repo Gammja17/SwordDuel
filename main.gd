@@ -907,7 +907,7 @@ func _build_hub() -> void:
 		var npc := HubNpcScript.new()
 		npc.position = c[3]
 		add_child(npc)
-		npc.setup(c[0], c[1], c[2], _hub_player)
+		npc.setup(c[0], c[1], c[2], _hub_player, {"doyun": "one", "mujin": "two", "taesan": "two", "leon": "one", "seohyuk": "shield", "serafin": "one", "kaiden": "two"}.get(c[0], "two"))
 		_hub_nodes.append(npc)
 		_hub_spots.append({"id": c[0], "pos": c[3], "r": 2.3, "prompt": c[1] + "에게 말을 건다"})
 	# The training board.

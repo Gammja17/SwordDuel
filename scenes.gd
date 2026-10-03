@@ -8,11 +8,11 @@ const NAMES := {
 	"serafin": "세라핀", "kaiden": "카이든", "mujin": "무진", "baldor": "발도르", "soldier": "북방 병사",
 }
 const OUTFITS := {
-	"rian": {"outfit": "player"}, "doyun": {"outfit": "squire"}, "taesan": {"outfit": "taesan"},
-	"leon": {"outfit": "leon"}, "seohyuk": {"outfit": "knight"}, "serafin": {"outfit": "woman_ranger"},
-	"kaiden": {"outfit": "kaiden"}, "mujin": {"outfit": "master"},
-	"baldor": {"outfit": "", "tabard": Color(0.10, 0.10, 0.28), "crest": true},
-	"soldier": {"outfit": "", "tabard": Color(0.12, 0.14, 0.30), "crest": false},
+	"rian": {"outfit": "player", "kit": "two"}, "doyun": {"outfit": "squire", "kit": "one"}, "taesan": {"outfit": "taesan", "kit": "two"},
+	"leon": {"outfit": "leon", "kit": "one"}, "seohyuk": {"outfit": "knight", "kit": "shield"}, "serafin": {"outfit": "woman_ranger", "kit": "one"},
+	"kaiden": {"outfit": "kaiden", "kit": "two"}, "mujin": {"outfit": "master", "kit": "two"},
+	"baldor": {"outfit": "", "kit": "two", "tabard": Color(0.10, 0.10, 0.28), "crest": true},
+	"soldier": {"outfit": "", "kit": "shield", "tabard": Color(0.12, 0.14, 0.30), "crest": false},
 }
 
 ## Day one: Rian walks in, and the squire Doyun shows the new charity student around

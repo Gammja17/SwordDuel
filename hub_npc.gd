@@ -14,13 +14,14 @@ var _body
 var _clip_t := 0.0
 
 
-func setup(id: String, name_: String, outfit: String, look_at_target: Node3D) -> void:
+func setup(id: String, name_: String, outfit: String, look_at_target: Node3D, kit := "two") -> void:
 	who = id
 	display_name = name_
 	target = look_at_target
 	_body = BodyScript.new()
 	add_child(_body)
 	_body.build(Color(), false, outfit)
+	_body.set_kit(kit)
 	_body.at_ease()
 	var label := Label3D.new()
 	label.text = name_
