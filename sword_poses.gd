@@ -30,6 +30,12 @@ const POSES := {
 	"end_lunge": [Vector3(0.03, 0.0, -0.46), Vector3(0.0, 0.06, -1.0), Vector3(0.0, 1.0, 0.0), 0.15, 0.30],
 	# Standing easy (cutscenes): the sword held low at the side, point to the ground.
 	"relaxed": [Vector3(0.30, -0.66, -0.04), Vector3(0.12, -1.0, -0.12), Vector3(0.0, 0.0, -1.0), 0.0, 0.0],
+	# 방패 밀치기: drawn back behind the shield, then the whole body driven forward.
+	"wind_bash": [Vector3(0.10, -0.10, -0.10), Vector3(0.10, 0.95, -0.25), Vector3(-1.0, 0.0, -0.3), 0.5, -0.28],
+	"end_bash": [Vector3(0.05, -0.05, -0.40), Vector3(0.0, 0.9, -0.4), Vector3(-1.0, 0.0, -0.3), -0.35, 0.38],
+	# 내려찍기: the blade high overhead, then straight down with everything behind it.
+	"wind_smash": [Vector3(0.05, 0.50, -0.02), Vector3(0.05, 0.95, 0.35), Vector3(0.0, 0.0, -1.0), 0.0, -0.18],
+	"end_smash": [Vector3(0.02, -0.34, -0.40), Vector3(0.0, -0.6, -1.0), Vector3(0.0, -1.0, 0.3), 0.0, 0.38],
 	# Knocked aside (stagger, lost bind): the blade flung out to the right.
 	"thrown": [Vector3(0.28, -0.18, -0.10), Vector3(0.85, 0.45, -0.25), Vector3(0.0, 1.0, 0.0), -0.25, -0.12],
 }

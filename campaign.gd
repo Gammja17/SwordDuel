@@ -379,17 +379,22 @@ static func tier(i: int, k := 0) -> Dictionary:
 	t.merge(s["fighter"], true)
 	if s.has("wave"):
 		t.merge(s["wave"][k], true)   # a wave room: the k-th fighter
+	var moves: Array = (t["lines"] as Array).duplicate()
 	match String(t.get("kit", "two")):
 		"shield":   # slower, harder to get through
+			moves.append("bash")
 			t["armor"] = float(t["armor"]) + 1.0
 			t["parry"] = minf(float(t["parry"]) + 0.15, 0.9)
 			t["speed"] = float(t["speed"]) - 0.2
 		"one":      # quicker and lighter on its feet
+			moves.append("dart")
 			t["windup"] = float(t["windup"]) * 0.9
 			t["speed"] = float(t["speed"]) + 0.2
 			t["armor"] = maxf(float(t["armor"]) - 0.3, 0.0)
 		_:          # two hands: heavier blows
+			moves.append("smash")
 			t["damage"] = float(t["damage"]) * 1.08
+	t["lines"] = moves
 	t["kicker"] = s["kicker"]
 	t["name"] = (s["name"] as String) if not s.has("wave") else String(s["wave"][k]["name"])
 	t["about"] = s["about"]

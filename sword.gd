@@ -212,7 +212,8 @@ func clash(point: Vector3, opp: Node, opp_vel: Vector3) -> String:
 				result = "GUARD BROKEN"
 		elif blocked:
 			# A passive block knocks our guard open and fills the guard meter.
-			if p.absorb_block(h):
+			var heavy: bool = opp != null and opp.has_method("heavy_blow") and opp.heavy_blow()
+			if p.absorb_block(h, 2.0 if heavy else 1.0):
 				result = "GUARD BROKEN"
 		elif parried:
 			p.parry_success(h)

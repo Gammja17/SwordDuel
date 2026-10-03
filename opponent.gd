@@ -14,6 +14,8 @@ extends CharacterBody3D
 signal died
 signal yielded   # a fighter that yields (tier "yields") went down on its knees instead of dying
 signal phase_changed   # it was hurt enough to change (its tier's "phase2")
+signal telegraphed(kind: String)   # a move worth warning the player about (bash, smash)
+signal bashed   # the shield bash landed
 signal attack_whiffed   # a cut ended without landing (dodged, fell short)
 
 enum State { IDLE, APPROACH, POISE, WINDUP, ATTACK, RECOVER, STAGGER, PARRY, BIND, DEAD, DODGE, HELD }
@@ -54,6 +56,7 @@ var _trail
 var _state: int = State.IDLE
 var _timer := 0.0
 var _kind := "a"
+var _bash_pending := false
 var _side := 1.0
 var _windup_total := 0.0
 var _feint_planned := false
@@ -162,7 +165,8 @@ func is_attacking() -> bool:
 
 ## Mid-cut and not yet landed: a blow the player can block.
 func is_striking() -> bool:
-	return _state == State.ATTACK and not _attack_hit
+	# (A shield bash is not the blade: it can't be blocked or parried, only dodged.)
+	return _state == State.ATTACK and not _attack_hit and _kind != "bash"
 
 
 func is_parrying() -> bool:
@@ -196,7 +200,7 @@ func land_cut(target: Node, point: Vector3) -> void:
 	# Its cuts are always fast; cap the speed so each tier's "damage" really sets how
 	# many hits the player can take (roughly 6 / 5 / 4 from first to last).
 	var speed := minf(blade_tip_vel.length(), 14.0)
-	target.receive_cut(speed * float(_t.get("damage", 1.0)) * dmg_mult, point, blade_tip_vel.normalized())
+	target.receive_cut(speed * float(_t.get("damage", 1.0)) * dmg_mult * (1.45 if _kind == "smash" else 1.0), point, blade_tip_vel.normalized())
 
 
 ## combat.gd, first thing each frame: where the animated sword is now.
@@ -269,6 +273,30 @@ func _check_phase() -> void:
 	Sfx.play("block", global_position + Vector3(0.0, 1.2, 0.0), 4.0)
 	Sfx.play("clash", global_position + Vector3(0.0, 1.2, 0.0), 0.0)
 	phase_changed.emit()
+
+
+## 방패 밀치기: the shield is driven into the player. A guard does not stop it (it is not
+## a blade), but a roll or a step back does. Hit, they lose their footing and some health.
+func _bash() -> void:
+	_bash_pending = false
+	_push = -global_transform.basis.z * 2.4
+	Sfx.play("block", global_position + Vector3(0.0, 1.0, 0.0), 2.0)
+	if _player == null or not is_instance_valid(_player) or _player.is_invulnerable():
+		return
+	var to: Vector3 = _player.global_position - global_position
+	to.y = 0.0
+	if to.length() > 1.9 or to.normalized().dot(-global_transform.basis.z) < 0.3:
+		return   # too far or off to the side: it caught only air
+	_attack_hit = true
+	var side := 1.0 if to_local(_player.global_position).x >= 0.0 else -1.0
+	_player.get_parried(side)   # the blade thrown wide, the guard shaken
+	_player.receive_cut(3.5 * float(_t.get("damage", 1.0)) * dmg_mult, _player.global_position + Vector3(0.0, 1.2, 0.0), -global_transform.basis.z)
+	bashed.emit()
+
+
+## A blow that will break a block (the overhead smash).
+func heavy_blow() -> bool:
+	return _kind == "smash" and is_striking()
 
 
 ## Our blade met the player's.
@@ -456,10 +484,13 @@ func _run_state(delta: float) -> void:
 			if _timer <= 0.0:
 				_start_attack()
 		State.ATTACK:
-			if _kind == "lunge":
+			if _kind == "lunge" or _kind == "dart":
 				_move(2.5)
+			if _kind == "bash" and _bash_pending and _timer <= float(_t.get("attack", 0.22)) * 0.5:
+				_bash()
 			if _timer <= 0.0:
-				if not _in_combo and randf() < float(_t.get("combo", 0.0)):
+				_bash_pending = false
+				if not _in_combo and (randf() < float(_t.get("combo", 0.0)) or (_kind == "dart" and randf() < 0.7)):
 					_in_combo = true
 					_start_windup(0.55)
 				else:
@@ -582,22 +613,36 @@ func _enter(state: int) -> void:
 			_body.act("Hit_Chest", 0.0, _body.clip_length("Hit_Chest"), _timer, 0.08)
 
 
+## The pose set a move uses: a dart is a short thrust.
+func _pose_of(kind: String) -> String:
+	return "lunge" if kind == "dart" else kind
+
+
 ## Windup: the sword drawn back for this cut, then held there until the strike.
 func _start_windup(scale: float) -> void:
 	var lines: Array = _t.get("lines", ["a"])
 	if scale < 0.8 and lines.size() > 1:
 		# A quick answer (riposte, punish) is a cut: a thrust needs a full draw back.
-		lines = lines.filter(func(l): return l != "lunge")
+		lines = lines.filter(func(l): return not (l in ["lunge", "bash", "smash"]))
 	_kind = lines[randi() % lines.size()]
 	_side = 1.0 if randf() < 0.5 else -1.0
 	# Better fighters vary their rhythm, so the cut can't be timed by counting.
 	var jitter := float(_t.get("windup_jitter", 0.0))
 	_windup_total = float(_t.get("windup", 0.4)) * scale * randf_range(1.0 - jitter, 1.0 + jitter)
+	match _kind:
+		"dart":
+			_windup_total *= 0.55   # quick and light
+		"smash":
+			_windup_total *= 1.4    # a long, readable draw back
+		"bash":
+			_windup_total *= 1.1
 	_feint_planned = scale >= 1.0 and lines.size() > 1 and randf() < float(_t.get("feint", 0.0))
 	_feinted = false
 	_state = State.WINDUP
 	_timer = _windup_total
-	_sword_to(SwordPoses.make("wind_" + _kind), _windup_total * WINDUP_DRAW, "out")
+	_sword_to(SwordPoses.make("wind_" + _pose_of(_kind)), _windup_total * WINDUP_DRAW, "out")
+	if _kind == "bash" or _kind == "smash":
+		telegraphed.emit(_kind)
 
 
 ## Feint: switch to a different attack partway through the windup, which costs a moment.
@@ -609,7 +654,7 @@ func _feint() -> void:
 		other = lines[randi() % lines.size()]
 	_kind = other
 	_timer += 0.2
-	_sword_to(SwordPoses.make("wind_" + _kind), 0.2)
+	_sword_to(SwordPoses.make("wind_" + _pose_of(_kind)), 0.2)
 
 
 ## Strike: from the held windup through to the far side in this tier's attack time,
@@ -617,9 +662,16 @@ func _feint() -> void:
 func _start_attack() -> void:
 	_attack_hit = false
 	_enter(State.ATTACK)
-	_sword_to(SwordPoses.make("end_" + _kind), _timer, "cut", CUT_ARC)
-	if SwordPoses.POSES.has("mid_" + _kind):
-		_via = SwordPoses.make("mid_" + _kind)
+	match _kind:
+		"dart":
+			_timer *= 0.8
+		"smash":
+			_timer *= 1.15
+		"bash":
+			_bash_pending = true
+	_sword_to(SwordPoses.make("end_" + _pose_of(_kind)), _timer, "cut", CUT_ARC)
+	if SwordPoses.POSES.has("mid_" + _pose_of(_kind)):
+		_via = SwordPoses.make("mid_" + _pose_of(_kind))
 	_push = -global_transform.basis.z * STRIKE_STEP
 	Sfx.play("swing", blade_tip, 0.0)
 

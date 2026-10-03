@@ -1256,6 +1256,8 @@ func _spawn_opponent(tier: Dictionary) -> void:
 	_opponent.died.connect(_on_opponent_died)
 	_opponent.phase_changed.connect(_on_boss_phase)
 	_opponent.yielded.connect(_on_boss_yield)
+	_opponent.telegraphed.connect(_on_telegraphed)
+	_opponent.bashed.connect(_on_bashed)
 	_opponent.attack_whiffed.connect(_on_attack_whiffed)
 
 
@@ -1391,6 +1393,21 @@ func _on_clash(_pos: Vector3, result: String) -> void:
 
 
 ## The boss was hurt enough: its plate breaks off and it comes on harder.
+## A move worth reading: say what is coming.
+func _on_telegraphed(kind: String) -> void:
+	if _phase != Phase.FIGHT:
+		return
+	if kind == "bash":
+		_hud.popup("방패 밀치기! 구르거나 물러나세요", Color(0.95, 0.7, 0.3))
+	else:
+		_hud.popup("내려찍는다! 막으면 자세가 크게 무너집니다", Color(0.95, 0.45, 0.3))
+
+
+func _on_bashed() -> void:
+	_hud.popup("방패에 밀렸다!", RED)
+	_hitstop(0.08)
+
+
 func _on_boss_phase() -> void:
 	_hud.popup("갑옷이 부서졌다!", RED)
 	_hitstop(0.15)

@@ -311,8 +311,8 @@ func parry_success(h: float) -> void:
 
 ## We only BLOCKED a cut (held the line, didn't swing into it). Fills the guard meter;
 ## returns true if that broke the guard.
-func absorb_block(h: float) -> bool:
-	if _add_posture(BLOCK_POSTURE * (1.0 + mod("block_posture")), h):
+func absorb_block(h: float, weight := 1.0) -> bool:
+	if _add_posture(BLOCK_POSTURE * weight * (1.0 + mod("block_posture")), h):
 		return true
 	_guard_recoil = 1.0
 	deflect(Vector2(h * 0.45, 0.25), 0.25)    # knocked open, but still in the fight
