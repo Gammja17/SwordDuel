@@ -127,6 +127,7 @@ func _ready() -> void:
 	_hud.volume_changed.connect(_on_volume_changed)
 	_hud.pref_changed.connect(_on_pref_changed)
 	_hud.title_choice.connect(_on_title_choice)
+	_hud.choice_picked.connect(_on_choice_picked)
 	_hud.reset_requested.connect(_on_reset_requested)
 	for bus in _volumes:
 		Sfx.set_volume(bus, _volumes[bus])
@@ -608,15 +609,13 @@ func _boon_pick(next_stage: int, rare_only := false) -> void:
 
 func _show_boon_offer() -> void:
 	_phase = Phase.BOON
-	var body := ""
-	for i in _boon_offer.size():
-		var b: Dictionary = _boon_offer[i]
-		var mark := "  [강함]" if b.get("rare", false) else ""
-		body += "%d  %s%s\n     %s\n\n" % [i + 1, b["name"], mark, b["text"]]
-	body += "4  배우지 않고 넘어간다\n\n익힌 기예 %d/%d" % [_boons.size(), _max_slots()]
+	var opts := []
+	for b in _boon_offer:
+		opts.append({"title": b["name"], "tag": "강함" if b.get("rare", false) else "", "text": b["text"], "note": ""})
+	var foot := "익힌 기예 %d/%d" % [_boons.size(), _max_slots()]
 	if _boons.size() >= _max_slots():
-		body += "  (가득 참: 새로 익히면 하나를 잊어야 합니다)"
-	_hud.show_card("스승에게 배운다", "기예를 하나 익히세요", body, "1, 2, 3 키로 고르세요")
+		foot += "  (가득 참: 새로 익히면 하나를 잊어야 합니다)"
+	_hud.show_choices("스승에게 배운다", "기예를 하나 익히세요", opts, foot + "   ·   클릭하거나 1, 2, 3 키", "4   배우지 않고 넘어간다")
 
 
 func _take_boon(i: int) -> void:
@@ -711,15 +710,14 @@ func _door_menu(opts: Array) -> void:
 	_hud.show_fight_ui(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var reward_text := {"boon": "기예를 배운다", "train": "기예를 강화한다", "rare": "강한 기예를 얻는다"}
-	var body := ""
-	for i in opts.size():
-		var o: Dictionary = opts[i]
+	var cards := []
+	for o in opts:
 		if o.get("rest", false):
-			body += "%d  휴식의 문\n     싸우지 않고 쉬며 기예 하나를 강화합니다.\n\n" % [i + 1]
+			cards.append({"title": "휴식의 문", "tag": "", "text": "싸우지 않고 쉬며 기예 하나를 강화합니다.", "note": ""})
 		else:
 			var r: Dictionary = o["room"]
-			body += "%d  %s\n     %s   ·   %s\n     보상: %s\n\n" % [i + 1, o["label"], r["name"], _room_place_name(r), reward_text.get(r["reward"], "")]
-	_hud.show_card("%d번째 방을 지나" % (Campaign.route.size() + 1), "어느 문으로 들어갈까", body.strip_edges(), "숫자 키로 고르세요")
+			cards.append({"title": o["label"], "tag": "%s · %s" % [r["name"], _room_place_name(r)], "text": "", "note": "보상: " + String(reward_text.get(r["reward"], ""))})
+	_hud.show_choices("%d번째 방을 지나" % (Campaign.route.size() + 1), "어느 문으로 들어갈까", cards, "클릭하거나 숫자 키")
 	_set_fps()
 
 
@@ -790,11 +788,11 @@ func _class_menu(stage: int) -> void:
 	_title_cam.current = true
 	_hud.show_fight_ui(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var body := ""
-	for i in Classes.ORDER.size():
-		var c: Dictionary = Classes.ALL[Classes.ORDER[i]]
-		body += "%d  %s  ·  %s\n     %s\n     %s\n\n" % [i + 1, c["name"], c["tag"], c["text"], c["ability_text"]]
-	_hud.show_card("전직을 고르세요", "어떻게 검을 쥘 것인가", body.strip_edges(), "1, 2, 3 키로 고르세요   (이번 학기 동안 바뀌지 않습니다)")
+	var opts := []
+	for k in Classes.ORDER:
+		var c: Dictionary = Classes.ALL[k]
+		opts.append({"title": c["name"], "tag": c["tag"], "text": c["text"], "note": c["ability_text"]})
+	_hud.show_choices("전직을 고르세요", "어떻게 검을 쥘 것인가", opts, "클릭하거나 1, 2, 3 키   (이번 학기 동안 바뀌지 않습니다)")
 	_set_fps()
 
 
@@ -804,6 +802,20 @@ func _pick_class(i: int) -> void:
 	_class = Classes.ORDER[i]
 	_hud.popup(Classes.ALL[_class]["name"], GOLD)
 	_begin_stage(_boon_next)
+
+
+func _on_choice_picked(i: int) -> void:
+	match _phase:
+		Phase.CLASS:
+			_pick_class(i)
+		Phase.SCHOOL:
+			_pick_school(i)
+		Phase.PATH:
+			_pick_path(i)
+		Phase.DOOR:
+			_pick_door(i)
+		Phase.BOON:
+			_take_boon(i)
 
 
 func _on_shoved() -> void:
@@ -819,12 +831,11 @@ func _school_menu(stage: int) -> void:
 	_title_cam.current = true
 	_hud.show_fight_ui(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var body := ""
-	for i in Schools.ORDER.size():
-		var s: Dictionary = Schools.ALL[Schools.ORDER[i]]
-		body += "%d  %s  ·  %s\n     %s\n     공명  %s\n\n" % [i + 1, s["name"], s["tag"], s["text"], s["res_text"]]
-	_hud.show_card("유파를 고르세요", "어떤 검으로 오를 것인가", body.strip_edges(),
-		"1, 2, 3 키로 고르세요   (한 판 동안 바꿀 수 없습니다)")
+	var opts := []
+	for k in Schools.ORDER:
+		var s: Dictionary = Schools.ALL[k]
+		opts.append({"title": s["name"], "tag": s["tag"], "text": s["text"], "note": "공명  " + String(s["res_text"])})
+	_hud.show_choices("유파를 고르세요", "어떤 검으로 오를 것인가", opts, "클릭하거나 1, 2, 3 키   (한 판 동안 바꿀 수 없습니다)")
 	_set_fps()
 
 
@@ -853,10 +864,12 @@ func _path_menu(next_stage: int) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var rival: String = Campaign.stage(next_stage - 1)["name"]
 	var can_train := _trainable().size() > 0
-	var body := "1  배운다\n     스승에게 새 기예를 배웁니다. 셋 중 하나를 고릅니다.\n\n"
-	body += "2  수련한다" + ("" if can_train else "  (강화할 기예가 없습니다)") + "\n     익힌 기예 하나를 1.5배 강하게 만듭니다.\n\n"
-	body += "3  정예 도전\n     %s의 복수전 신청이 왔습니다. 더 강하지만 이기면 강한 기예를 하나 얻습니다. 져도 잃는 것은 없습니다." % rival
-	_hud.show_card("길을 고르세요", "석차 %d위 · 다음 상대 앞" % _rank, body, "1, 2, 3 키로 고르세요")
+	var opts := [
+		{"title": "배운다", "tag": "", "text": "스승에게 새 기예를 배웁니다. 셋 중 하나를 고릅니다.", "note": ""},
+		{"title": "수련한다", "tag": "" if can_train else "강화할 기예 없음", "text": "익힌 기예 하나를 1.5배 강하게 만듭니다.", "note": ""},
+		{"title": "정예 도전", "tag": "", "text": "%s의 복수전 신청이 왔습니다. 더 강하지만 이기면 강한 기예를 하나 얻습니다. 져도 잃는 것은 없습니다." % rival, "note": ""},
+	]
+	_hud.show_choices("길을 고르세요", "석차 %d위 · 다음 상대 앞" % _rank, opts, "클릭하거나 1, 2, 3 키")
 	_set_fps()
 
 

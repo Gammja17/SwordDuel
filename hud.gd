@@ -5,6 +5,7 @@ signal settings_closed(to_title: bool)
 signal volume_changed(bus: String, value: float)
 signal pref_changed(key: String, value: float)   # quality, difficulty (index), sens, text (share), fullscreen
 signal reset_requested
+signal choice_picked(index: int)   # a card clicked on a choice screen
 signal title_choice(id: String)   # a choice on the main screen
 ## Everything drawn on screen: the opponent's name and health (top), our health and
 ## guard (bottom), popups for parries/blocks, one-line hints, a hurt vignette, and the
@@ -31,6 +32,10 @@ var _card_kicker: Label
 var _card_title: Label
 var _card_body: Label
 var _card_footer: Label
+var _choices: HBoxContainer
+var _skip: Button
+var _choice_count := 0
+var _choices_ready_at := 0
 var _fade: ColorRect
 var _hint_tween: Tween
 var _popup_tween: Tween
@@ -284,7 +289,79 @@ func clear_hint() -> void:
 	_hint_panel.modulate.a = 0.0
 
 
+## A row of cards to pick from, by click or by number key (main.gd answers choice_picked).
+## Each option: {"title", "tag", "text", "note"}; skip_label adds a plain button after the cards.
+func show_choices(kicker: String, title: String, options: Array, footer: String, skip_label := "") -> void:
+	show_card(kicker, title, "", footer)
+	for c in _choices.get_children():
+		_choices.remove_child(c)
+		c.queue_free()
+	_choice_count = options.size()
+	_choices_ready_at = Time.get_ticks_msec() + 350
+	for i in options.size():
+		_choices.add_child(_choice_card(i, options[i]))
+	_choices.visible = true
+	_skip.text = skip_label
+	_skip.visible = skip_label != ""
+
+
+func _choice_card(i: int, o: Dictionary) -> PanelContainer:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color(0.11, 0.10, 0.09, 0.94)
+	normal.set_border_width_all(2)
+	normal.border_color = Color(0.42, 0.36, 0.24, 0.9)
+	normal.set_corner_radius_all(8)
+	normal.set_content_margin_all(18)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color(0.17, 0.14, 0.10, 0.97)
+	hover.border_color = GOLD
+	hover.set_border_width_all(3)
+	var p := PanelContainer.new()
+	p.custom_minimum_size = Vector2(250, 250)
+	p.mouse_filter = Control.MOUSE_FILTER_STOP
+	p.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	p.add_theme_stylebox_override("panel", normal)
+	p.mouse_entered.connect(func(): p.add_theme_stylebox_override("panel", hover))
+	p.mouse_exited.connect(func(): p.add_theme_stylebox_override("panel", normal))
+	p.gui_input.connect(func(e: InputEvent):
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			p.accept_event()
+			if Time.get_ticks_msec() >= _choices_ready_at:
+				choice_picked.emit(i))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(v)
+	v.add_child(_card_label(str(i + 1), 22, GOLD, false))
+	v.add_child(_card_label(String(o.get("title", "")), 28, Color(1, 1, 1), false))
+	if String(o.get("tag", "")) != "":
+		v.add_child(_card_label(String(o["tag"]), 17, GOLD, false))
+	var line := HSeparator.new()
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(line)
+	var body := _card_label(String(o.get("text", "")), 18, Color(0.92, 0.9, 0.85), true)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(body)
+	if String(o.get("note", "")) != "":
+		v.add_child(_card_label(String(o["note"]), 16, Color(0.98, 0.86, 0.5), true))
+	return p
+
+
+func _card_label(text: String, size: int, color: Color, left: bool) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.custom_minimum_size = Vector2(214, 0)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if left else HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
 func show_card(kicker: String, title: String, body: String, footer: String) -> void:
+	_choices.visible = false
+	_skip.visible = false
 	_card_kicker.text = kicker
 	_card_kicker.visible = kicker != ""
 	_card_title.text = title
@@ -298,6 +375,8 @@ func show_card(kicker: String, title: String, body: String, footer: String) -> v
 
 func hide_card() -> void:
 	_card.visible = false
+	_choices.visible = false
+	_skip.visible = false
 
 
 func is_card_visible() -> bool:
@@ -447,6 +526,19 @@ func _build_card() -> void:
 	_card_body.add_theme_font_size_override("font_size", 20)
 	_card_body.add_theme_constant_override("line_spacing", 6)
 	box.add_child(_card_body)
+
+	_choices = HBoxContainer.new()
+	_choices.alignment = BoxContainer.ALIGNMENT_CENTER
+	_choices.add_theme_constant_override("separation", 14)
+	_choices.visible = false
+	box.add_child(_choices)
+
+	_skip = Button.new()
+	_skip.visible = false
+	_skip.pressed.connect(func():
+		if Time.get_ticks_msec() >= _choices_ready_at:
+			choice_picked.emit(_choice_count))
+	box.add_child(_skip)
 
 	_card_footer = Label.new()
 	_card_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

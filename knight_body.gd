@@ -600,6 +600,7 @@ func set_glow(move: String) -> void:
 func at_ease() -> void:
 	_two_hands = 0.0
 	_grip_hands.left_target = null   # (or it keeps twisting the wrist round to the sword's grip)
+	_grip_hands.right_target = null   # same for the right: the hand keeps its own angle round the hilt
 	_grip_hands.open_left = true
 	stand_still()
 
