@@ -573,12 +573,14 @@ func set_kit(kind: String) -> void:
 	_kit = kind
 	if kind == "one" or kind == "shield":
 		_two_hands = 0.0
+		_grip_hands.left_target = null   # the free hand is not turned to the grip
 	if kind == "shield":
 		_kay_piece("Round_Shield", "LeftLowerArm", SHIELD_POS, SHIELD_ROT, Vector3.ONE * 0.68, Armor.two_sided(Armor.steel()))
 
 
 func at_ease() -> void:
 	_two_hands = 0.0
+	_grip_hands.left_target = null   # (or it keeps twisting the wrist round to the sword's grip)
 	_grip_hands.open_left = true
 	stand_still()
 
