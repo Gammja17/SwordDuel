@@ -29,6 +29,10 @@ const PLACES := {
 		"fog_d": 0.018, "amb": 0.25, "bg": 0.15, "torch": 2.2, "note": "횃불에 의지해 싸웁니다. 칼이 잘 보이지 않습니다."},
 	"overcast": {"name": "흐린 한낮의 연무장", "sun": Color(0.92, 0.92, 0.95), "sun_e": 1.0, "fog": Color(0.70, 0.70, 0.72),
 		"fog_d": 0.006, "amb": 1.2, "bg": 1.0, "torch": 0.6, "note": "구경하는 학생들이 담장 위에 모였습니다."},
+	"village": {"name": "해질녘 마을 골목", "sun": Color(1.0, 0.78, 0.58), "sun_e": 1.1, "fog": Color(0.60, 0.52, 0.48),
+		"fog_d": 0.010, "amb": 1.0, "bg": 1.0, "torch": 0.9, "set": "village", "note": "집들 사이 좁은 골목입니다. 구경꾼의 창문이 내려다봅니다."},
+	"hall": {"name": "실내 훈련장", "sun": Color(1.0, 0.8, 0.6), "sun_e": 0.35, "fog": Color(0.20, 0.14, 0.10),
+		"fog_d": 0.004, "amb": 1.5, "bg": 0.5, "torch": 3.2, "set": "hall", "note": "지붕 아래, 횃불과 나무 바닥뿐입니다."},
 	"war": {"name": "불타는 연무장", "sun": Color(1.0, 0.42, 0.22), "sun_e": 0.7, "fog": Color(0.30, 0.15, 0.11),
 		"fog_d": 0.024, "amb": 0.6, "bg": 0.45, "torch": 1.6, "note": "북방군이 성문을 넘었습니다."},
 }
@@ -210,7 +214,7 @@ static var route: Array = []   # the rooms of this term, as they were entered
 # Which of STAGES holds each named fighter's room.
 const RIVAL_INDEX := {"taesan": 0, "leon": 2, "seohyuk": 3, "serafin": 5, "kaiden": 6, "soldier": 7, "elite": 8, "baldor": 9}
 const MID_RIVALS := ["taesan", "leon", "seohyuk", "serafin"]
-const DOOR_PLACES := ["dusk", "dawn", "rain", "night", "overcast"]
+const DOOR_PLACES := ["dusk", "dawn", "rain", "night", "overcast", "village", "hall"]
 
 # The fighters of the wave rooms. Numbers grow with depth (scale_mob).
 const MOB_TYPES := {

@@ -105,6 +105,12 @@ Sizes are Poly Haven's listed real-world dimensions (width x depth x height; the
 | `castle_door/` | Large Castle Door (`large_castle_door_1k.gltf`), arched double wooden door with iron straps; frame and each leaf are separate nodes | 2.01 x 0.34 x 2.97 m | 12,640 | Tina | https://polyhaven.com/a/large_castle_door | CC0 |
 | `fire_pit/` | Stone Fire Pit (`stone_fire_pit_1k.gltf`), a ring of rough stones around a sooty basin | 1.45 x 1.43 x 0.39 m | 3,887 | Sebastian Platen | https://polyhaven.com/a/stone_fire_pit | CC0 |
 
+## Village kit (`environment/village/`)
+
+| Files | Original asset | Author | Source | License |
+|---|---|---|---|---|
+| `*.gltf`, `*.bin`, `T_*.png` | Medieval Village MegaKit, free Standard version (`glTF/`: a selection of walls, windows, doors, floors, roofs, a wagon, a crate, fences; textures scaled to 1024×1024 or smaller) | Quaternius | https://quaternius.com/packs/medievalvillagemegakit.html | CC0 |
+
 ## Fonts (`fonts/`)
 
 | File | Original asset | Author | Source | License |

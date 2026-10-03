@@ -5,6 +5,7 @@ signal settings_closed(to_title: bool)
 signal volume_changed(bus: String, value: float)
 signal pref_changed(key: String, value: float)   # quality, difficulty (index), sens, text (share), fullscreen
 signal reset_requested
+signal title_choice(id: String)   # a choice on the main screen
 ## Everything drawn on screen: the opponent's name and health (top), our health and
 ## guard (bottom), popups for parries/blocks, one-line hints, a hurt vignette, and the
 ## full-screen cards used for the title, duel intros and results.
@@ -44,6 +45,9 @@ var _settings_button: Button
 var _resume_button: Button
 var _title_button: Button
 var _sliders := {}
+var _title_root: Control
+var _title_menu: VBoxContainer
+var _title_status: Label
 var _pref_controls := {}
 var _reset_button: Button
 var _reset_armed := false
@@ -131,6 +135,7 @@ func _ready() -> void:
 	_build_card()
 	_build_settings()
 	_build_status()
+	_build_title()
 
 	_fade = ColorRect.new()
 	_fade.color = Color(0, 0, 0, 0)
@@ -594,6 +599,97 @@ func _build_settings() -> void:
 
 	_root.add_child(_settings)
 	_settings.visible = false
+
+
+## The main screen: the logo, and a column of choices over the slowly turning courtyard.
+## items: [[id, text], ...]; `title_choice(id)` is emitted when one is picked.
+func show_title(items: Array, status: String) -> void:
+	for c in _title_menu.get_children():
+		c.queue_free()
+	for it in items:
+		var b := Button.new()
+		b.text = it[1]
+		b.flat = true
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.focus_mode = Control.FOCUS_NONE
+		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		b.add_theme_font_override("font", _title_font())
+		b.add_theme_font_size_override("font_size", 34)
+		b.add_theme_color_override("font_color", Color(0.93, 0.89, 0.78))
+		b.add_theme_color_override("font_hover_color", Color(1.0, 0.82, 0.38))
+		b.add_theme_color_override("font_pressed_color", Color(1.0, 0.92, 0.6))
+		for st in ["normal", "hover", "pressed", "focus"]:
+			b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+		var id: String = it[0]
+		b.pressed.connect(func(): title_choice.emit(id))
+		_title_menu.add_child(b)
+	_title_status.text = status
+	_title_root.visible = true
+	_title_root.modulate.a = 0.0
+	create_tween().set_ignore_time_scale(true).tween_property(_title_root, "modulate:a", 1.0, 0.8)
+
+
+func hide_title() -> void:
+	_title_root.visible = false
+
+
+func _build_title() -> void:
+	_title_root = Control.new()
+	_title_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_title_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_root.visible = false
+	_root.add_child(_title_root)
+	# A dark band down the left so the writing reads over any background.
+	var band := ColorRect.new()
+	band.color = Color(0.03, 0.02, 0.02, 0.62)
+	band.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+	band.offset_right = 620.0
+	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_root.add_child(band)
+	var edge := ColorRect.new()
+	edge.color = Color(0.98, 0.82, 0.35, 0.55)
+	edge.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+	edge.offset_left = 618.0
+	edge.offset_right = 620.0
+	edge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_root.add_child(edge)
+	var box := VBoxContainer.new()
+	box.position = Vector2(84, 96)
+	box.custom_minimum_size = Vector2(480, 0)
+	box.add_theme_constant_override("separation", 6)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_root.add_child(box)
+	var kicker := Label.new()
+	kicker.text = "왕립 철검관"
+	kicker.add_theme_font_override("font", _title_font())
+	kicker.add_theme_font_size_override("font_size", 26)
+	kicker.add_theme_color_override("font_color", Color(0.98, 0.82, 0.35))
+	box.add_child(kicker)
+	var logo := Label.new()
+	logo.text = "진검승부"
+	logo.add_theme_font_override("font", _title_font())
+	logo.add_theme_font_size_override("font_size", 112)
+	logo.add_theme_color_override("font_color", Color(0.98, 0.95, 0.86))
+	logo.add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.02))
+	logo.add_theme_constant_override("outline_size", 10)
+	box.add_child(logo)
+	var tag := Label.new()
+	tag.text = "검 한 자루로 오르는 학교"
+	tag.add_theme_font_size_override("font_size", 22)
+	tag.add_theme_color_override("font_color", Color(0.80, 0.76, 0.68))
+	box.add_child(tag)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 42)
+	box.add_child(gap)
+	_title_menu = VBoxContainer.new()
+	_title_menu.add_theme_constant_override("separation", 4)
+	box.add_child(_title_menu)
+	_title_status = Label.new()
+	_title_status.position = Vector2(84, 640)
+	_title_status.add_theme_font_size_override("font_size", 18)
+	_title_status.add_theme_color_override("font_color", Color(0.78, 0.74, 0.66))
+	_title_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_root.add_child(_title_status)
 
 
 func _build_status() -> void:

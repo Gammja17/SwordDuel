@@ -21,7 +21,7 @@ const Schools := preload("res://schools.gd")
 const HubPlayerScript := preload("res://hub_player.gd")
 const HubNpcScript := preload("res://hub_npc.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, DOOR, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, DOOR, HELP, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -124,6 +124,7 @@ func _ready() -> void:
 	_hud.settings_closed.connect(_close_menu)
 	_hud.volume_changed.connect(_on_volume_changed)
 	_hud.pref_changed.connect(_on_pref_changed)
+	_hud.title_choice.connect(_on_title_choice)
 	_hud.reset_requested.connect(_on_reset_requested)
 	for bus in _volumes:
 		Sfx.set_volume(bus, _volumes[bus])
@@ -247,6 +248,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif k == KEY_2:
 			_choose("spare")
 		return
+	if _phase == Phase.TITLE and click:
+		return
 	if click or key:
 		_advance()
 
@@ -272,6 +275,8 @@ func _advance() -> void:
 			_to_hub()
 		Phase.HUB_TALK, Phase.RUN_END:
 			_to_hub()
+		Phase.HELP:
+			_to_title()
 		Phase.INTRO:
 			_start_fight()
 		Phase.OUTCOME:
@@ -302,24 +307,61 @@ func _advance() -> void:
 func _to_title() -> void:
 	_phase = Phase.TITLE
 	_set_war(false)
+	_set_place("village")
 	_clear_duel()
-	# A knight waiting in the courtyard while the camera circles.
+	# Someone waiting in the yard while the camera circles.
 	_opponent = OpponentScript.new()
 	add_child(_opponent)
 	_opponent.setup(null, Campaign.tier(0))
 	_title_cam.current = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_hud.hide_card()
 	_hud.show_fight_ui(false)
 	_hud.clear_hint()
 	_hud.clear_task()
 	_hud.hide_bind()
-	var standing := ""
+	var items := []
+	if not _entrance_seen:
+		items.append(["start", "시작하기"])
+	else:
+		items.append(["start", "기숙사로 돌아가기"])
+	items.append_array([["practice", "연습"], ["controls", "조작법"], ["settings", "설정"]])
+	if not OS.has_feature("web"):
+		items.append(["quit", "나가기"])
+	var status := ""
 	if int(_meta.get("runs", 0)) > 0:
-		standing = "\n\n%d번째 학기까지 치렀습니다 · 최고 기록 %d번째 상대 · 수련 점수 %d" % [
-			int(_meta.get("runs", 0)), int(_meta.get("best_stage", 0)), int(_meta.get("pts", 0))]
-	_hud.show_card("왕립 철검관 · 1대1 검술 결투", "진검승부",
-		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 구르기, 우클릭 막기와 쳐내기\n쳐낸 뒤 E를 누르면 치명타, 거의 쓰러진 상대는 처형\n휠 클릭 락온 켜고 끄기\n순위전을 이겨 수석으로 졸업하세요." + standing,
-		"클릭하면 기숙사로 들어갑니다\nP 연습 다시 · N 모든 기록 지우기" if _practice_done else "클릭하면 시작합니다")
+		status = "%s   ·   학교 석차 %d위   ·   %d번째 학기까지   ·   최고 기록 %d번째 방" % [
+			Campaign.grade_name(int(_meta.get("total", 0))), _school_rank(), int(_meta.get("runs", 0)), int(_meta.get("best_stage", 0))]
+	_hud.show_title(items, status)
+	_click_ready_at = Time.get_ticks_msec() + 300
+	_set_fps()
+
+
+## A title menu choice.
+func _on_title_choice(id: String) -> void:
+	if _phase != Phase.TITLE or Time.get_ticks_msec() < _click_ready_at:
+		return
+	match id:
+		"start":
+			_hud.hide_title()
+			_advance()
+		"practice":
+			_hud.hide_title()
+			_start_practice()
+		"controls":
+			_show_controls()
+		"settings":
+			_open_menu(false)
+		"quit":
+			get_tree().quit()
+
+
+func _show_controls() -> void:
+	_phase = Phase.HELP
+	_hud.hide_title()
+	_hud.show_card("조작법", "마우스로 칼을 휘두릅니다",
+		"마우스를 세게 휘두르거나 좌클릭: 크게 벱니다\n우클릭: 막기. 칼이 닿기 직전에 누르면 쳐내기\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스: 구르기\n쳐낸 뒤 E: 치명타.  거의 쓰러진 상대에게 E: 처형\n휠 클릭: 락온 켜고 끄기\nESC: 설정\n\n기숙사에서는 WASD 로 걷고 E 로 말을 걸거나 문을 엽니다.",
+		"클릭하면 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
 
@@ -1521,7 +1563,9 @@ func _save_progress() -> void:
 func _set_fps() -> void:
 	var fighting := _phase == Phase.FIGHT or _phase == Phase.PRACTICE or _phase == Phase.SCENE or _phase == Phase.HUB
 	Engine.max_fps = 60 if fighting else 30
-	_hud.show_settings_button(not fighting and not _menu_open)
+	_hud.show_settings_button(not fighting and not _menu_open and _phase != Phase.TITLE)
+	if _phase != Phase.TITLE:
+		_hud.hide_title()
 	_update_music()
 
 
@@ -1649,6 +1693,7 @@ func _apply_place(name: String) -> void:
 	_env.ambient_light_energy = p["amb"]
 	_env.background_energy_multiplier = p["bg"]
 	_torch_scale = float(p["torch"])
+	_show_set(String(p.get("set", "")))
 	if is_instance_valid(_rain):
 		_rain.queue_free()
 		_rain = null
@@ -1838,6 +1883,87 @@ func _build_world() -> void:
 	world_env.environment = env
 	add_child(world_env)
 	_env = env
+	_build_sets()
+
+
+# --- 장소마다 다른 무대: 마을 골목과 실내 훈련장 ----------------------------------------------------
+# The courtyard stays; around and above it, a set of modular pieces (assets/environment/village,
+# Quaternius Medieval Village MegaKit, CC0) is shown for the places that call for one.
+
+const KIT_DIR := "res://assets/environment/village/"
+var _kit_cache := {}
+var _set_nodes := {}   # "village" / "hall" -> Node3D holding that set
+
+
+func _kit(piece: String, parent: Node3D, pos: Vector3, yaw_deg := 0.0, scale := 1.0) -> Node3D:
+	if not _kit_cache.has(piece):
+		var path := KIT_DIR + piece + ".gltf"
+		_kit_cache[piece] = load(path) if ResourceLoader.exists(path) else null
+	var ps = _kit_cache[piece]
+	if ps == null:
+		return null
+	var n := (ps as PackedScene).instantiate() as Node3D
+	n.position = pos
+	n.rotation_degrees.y = yaw_deg
+	n.scale = Vector3.ONE * scale
+	parent.add_child(n)
+	return n
+
+
+func _build_sets() -> void:
+	var village := Node3D.new()
+	village.name = "VillageSet"
+	add_child(village)
+	_set_nodes["village"] = village
+	# Houses on three sides beyond the walls (the gate side stays open to the road).
+	var floor1 := ["Wall_Plaster_Door_Round", "Wall_Plaster_Window_Wide_Round", "Wall_Plaster_Straight", "Wall_Plaster_Window_Wide_Flat",
+		"Wall_Plaster_WoodGrid", "Wall_Plaster_Window_Wide_Round", "Wall_Plaster_Straight"]
+	var floor2 := ["Wall_Plaster_Window_Wide_Flat", "Wall_Plaster_Straight", "Wall_Plaster_Window_Wide_Round", "Wall_Plaster_WoodGrid"]
+	for side in [[Vector3(0.0, 0.0, 1.0), 180.0], [Vector3(1.0, 0.0, 0.0), 90.0], [Vector3(-1.0, 0.0, 0.0), -90.0], [Vector3(0.0, 0.0, -1.0), 0.0]]:
+		var dir: Vector3 = side[0]
+		var along := Vector3(dir.z, 0.0, -dir.x) if absf(dir.x) > 0.5 else Vector3(1.0, 0.0, 0.0)
+		var dist := 12.5 if dir.z < 0.0 else 11.0
+		for i in 13:
+			var off := (i - 6) * 2.0
+			var at := dir * dist + along * off
+			_kit(floor1[(i + int(absf(dir.x) * 3.0)) % floor1.size()], village, at, side[1])
+			_kit(floor2[(i * 2 + int(absf(dir.x) * 3.0)) % floor2.size()], village, at + Vector3(0.0, 3.12, 0.0), side[1])
+		# Behind the facade: a dark inside to look into, and a roof over it.
+		var back := Armor.part(village, Armor.box(Vector3(28.0, 8.0, 0.3)), Armor.cloth(Color(0.20, 0.15, 0.12)), dir * (dist + 0.55) + Vector3(0.0, 4.0, 0.0))
+		back.rotation_degrees.y = side[1]
+		for r in 3:
+			_kit("Roof_RoundTiles_8x8", village, dir * (dist + 4.6) + along * ((r - 1) * 9.0) + Vector3(0.0, 5.4, 0.0), side[1])
+	# Things left lying about.
+	_kit("Prop_Wagon", village, Vector3(-5.8, 0.0, 6.0), 70.0)
+	_kit("Prop_Crate", village, Vector3(6.3, 0.0, 5.6), 20.0, 0.7)
+	_kit("Prop_Crate", village, Vector3(6.9, 0.0, 4.6), 55.0, 0.6)
+	for i in 5:
+		_kit("Prop_WoodenFence_Single", village, Vector3(-3.0 + i * 2.0, 0.0, 7.4), 0.0)
+	village.visible = false
+
+	var hall := Node3D.new()
+	hall.name = "HallSet"
+	add_child(hall)
+	_set_nodes["hall"] = hall
+	# A wooden floor over the paving, brick walls all round, beams and a roof overhead.
+	for ix in 9:
+		for iz in 9:
+			_kit("Floor_WoodDark", hall, Vector3(-8.0 + ix * 2.0, 0.015, -8.0 + iz * 2.0))
+	for side in [[Vector3(0.0, 0.0, 1.0), 180.0], [Vector3(1.0, 0.0, 0.0), 90.0], [Vector3(-1.0, 0.0, 0.0), -90.0], [Vector3(0.0, 0.0, -1.0), 0.0]]:
+		var dir2: Vector3 = side[0]
+		var along2 := Vector3(dir2.z, 0.0, -dir2.x) if absf(dir2.x) > 0.5 else Vector3(1.0, 0.0, 0.0)
+		for i in 9:
+			var piece := "Wall_UnevenBrick_Window_Wide_Round" if i % 3 == 1 else "Wall_UnevenBrick_Straight"
+			_kit(piece, hall, -dir2 * 8.6 + along2 * ((i - 4) * 2.0), side[1] + 180.0)
+	Armor.part(hall, Armor.box(Vector3(19.0, 0.3, 19.0)), Armor.wood(), Vector3(0.0, 3.5, 0.0))
+	for k in 7:
+		Armor.part(hall, Armor.box(Vector3(0.4, 0.45, 18.6)), Armor.wood(), Vector3(-7.5 + k * 2.5, 3.2, 0.0))
+	hall.visible = false
+
+
+func _show_set(name: String) -> void:
+	for k in _set_nodes:
+		(_set_nodes[k] as Node3D).visible = (k == name)
 
 
 ## The northern army is in the courtyard: a dark red sky, smoke, big fires on the walls and
