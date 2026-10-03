@@ -70,7 +70,7 @@ const STAGES := [
 		"about": "좌우로 번갈아 베고, 가끔 치켜든 쪽을 바꿔 속입니다. 함부로 휘두르면 받아칩니다.",
 		"fighter": {"outfit": "knight"},
 		"place": "rain", "rank": [18, 10], "barks": {"start": ["서혁: 정정당당히.", "서혁: 빗길을 조심하게."], "retry": ["서혁: 다시 서게. 예를 갖추겠네.", "서혁: 졌다고 부끄러워 말게."], "parried": ["서혁: ……좋은 수다.", "서혁: 읽혔군."]},
-		"pre": ["report", "mujin_train", "seohyuk_pre"], "post": ["seohyuk_post"]},
+		"pre": ["seohyuk_pre"], "post": ["seohyuk_post"]},
 	{"kicker": "연전 · 귀족가 호위병", "name": "귀족가 호위병 둘",
 		"about": "귀족 자제를 따라온 호위병 둘이 길을 막습니다. 갑옷이 단단하고 노련합니다.",
 		"fighter": {}, "rank": [0, 0], "place": "rain", "pre": [], "post": [],
@@ -156,6 +156,14 @@ const HUB_TALKS := [
 # What each person tells you as you get to know them, in order. A step opens once enough terms
 # (runs) have been finished and enough ranking exams taken; until then they only say the
 # little things in HUB_TALKS. Each talk moves the bond one step.
+# Story beats that come due in the yard: the terms (runs) and exams behind you that open them.
+const HUB_EVENTS := [
+	{"scene": "mujin_train", "runs": 1, "exams": 0},
+	{"scene": "report", "runs": 2, "exams": 0},
+	{"scene": "after_exam", "runs": 0, "exams": 1},
+	{"scene": "rumor", "runs": 0, "exams": 2},
+]
+
 const HUB_CHAINS := {
 	"doyun": [
 		{"runs": 0, "exams": 0, "text": "처음엔 누구나 꼴찌에서 시작하네. 자네는 벌써 한 걸음 나아갔군."},

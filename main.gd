@@ -273,8 +273,10 @@ func _advance() -> void:
 		Phase.PRACTICE_DONE:
 			_totals = _new_stats()
 			_to_hub()
-		Phase.HUB_TALK, Phase.RUN_END:
+		Phase.HUB_TALK:
 			_to_hub()
+		Phase.RUN_END:
+			_after_run()
 		Phase.HELP:
 			_to_title()
 		Phase.INTRO:
@@ -1078,6 +1080,16 @@ func _run_end_card() -> void:
 	_hud.show_card(("시험이 끝났습니다" if _term_kind == "exam" else "학기가 끝났습니다"), "수련 기록", body, "클릭하면 기숙사로 돌아갑니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
 	_set_fps()
+
+
+## Back from a term: if a story event has come due (enough terms and exams behind you), it
+## plays first, one at a time, and then the yard.
+func _after_run() -> void:
+	for e in Campaign.HUB_EVENTS:
+		if int(_meta.get("runs_done", 0)) >= int(e["runs"]) and int(_meta.get("exams", 0)) >= int(e["exams"]) and not _seen.has(e["scene"]):
+			_run_scenes([e["scene"]], _to_hub)
+			return
+	_to_hub()
 
 
 func _next_grade_cost() -> int:
