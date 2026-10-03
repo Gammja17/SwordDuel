@@ -299,13 +299,13 @@ func show_choices(kicker: String, title: String, options: Array, footer: String,
 	_choice_count = options.size()
 	_choices_ready_at = Time.get_ticks_msec() + 350
 	for i in options.size():
-		_choices.add_child(_choice_card(i, options[i]))
+		_choices.add_child(_choice_card(i, options[i], 250.0 if options.size() <= 3 else 188.0))
 	_choices.visible = true
 	_skip.text = skip_label
 	_skip.visible = skip_label != ""
 
 
-func _choice_card(i: int, o: Dictionary) -> PanelContainer:
+func _choice_card(i: int, o: Dictionary, width := 250.0) -> PanelContainer:
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = Color(0.11, 0.10, 0.09, 0.94)
 	normal.set_border_width_all(2)
@@ -317,7 +317,7 @@ func _choice_card(i: int, o: Dictionary) -> PanelContainer:
 	hover.border_color = GOLD
 	hover.set_border_width_all(3)
 	var p := PanelContainer.new()
-	p.custom_minimum_size = Vector2(250, 250)
+	p.custom_minimum_size = Vector2(width, 250)
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	p.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	p.add_theme_stylebox_override("panel", normal)
@@ -332,25 +332,25 @@ func _choice_card(i: int, o: Dictionary) -> PanelContainer:
 	v.add_theme_constant_override("separation", 8)
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.add_child(v)
-	v.add_child(_card_label(str(i + 1), 22, GOLD, false))
-	v.add_child(_card_label(String(o.get("title", "")), 28, Color(1, 1, 1), false))
+	v.add_child(_card_label(str(i + 1), 22, GOLD, false, width))
+	v.add_child(_card_label(String(o.get("title", "")), 28 if width > 200.0 else 23, Color(1, 1, 1), false, width))
 	if String(o.get("tag", "")) != "":
-		v.add_child(_card_label(String(o["tag"]), 17, GOLD, false))
+		v.add_child(_card_label(String(o["tag"]), 17, GOLD, false, width))
 	var line := HSeparator.new()
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(line)
-	var body := _card_label(String(o.get("text", "")), 18, Color(0.92, 0.9, 0.85), true)
+	var body := _card_label(String(o.get("text", "")), 18 if width > 200.0 else 16, Color(0.92, 0.9, 0.85), true, width)
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(body)
 	if String(o.get("note", "")) != "":
-		v.add_child(_card_label(String(o["note"]), 16, Color(0.98, 0.86, 0.5), true))
+		v.add_child(_card_label(String(o["note"]), 16, Color(0.98, 0.86, 0.5), true, width))
 	return p
 
 
-func _card_label(text: String, size: int, color: Color, left: bool) -> Label:
+func _card_label(text: String, size: int, color: Color, left: bool, width := 250.0) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.custom_minimum_size = Vector2(214, 0)
+	l.custom_minimum_size = Vector2(width - 36.0, 0)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if left else HORIZONTAL_ALIGNMENT_CENTER
 	l.add_theme_font_size_override("font_size", size)

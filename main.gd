@@ -539,9 +539,10 @@ func _choice() -> void:
 	_phase = Phase.CHOICE
 	_hud.show_fight_ui(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_hud.show_card("마지막 선택", "발도르가 무릎을 꿇었다",
-		"그는 안개 골짜기에서 있었던 일을 아는 유일한 사람입니다.\n\n1  처형한다. 아버지의 복수는 끝나고, 진실은 묻힌다.\n2  살려서 증언하게 한다. 진실이 밝혀지지만 대가가 따른다.",
-		"1 또는 2 키로 고르세요")
+	_hud.show_choices("마지막 선택", "발도르가 무릎을 꿇었다", [
+		{"title": "처형한다", "tag": "", "text": "아버지의 복수는 끝나고, 진실은 묻힌다.", "note": ""},
+		{"title": "살려서 증언하게 한다", "tag": "", "text": "진실이 밝혀지지만 대가가 따른다.", "note": ""},
+	], "그는 안개 골짜기에서 있었던 일을 아는 유일한 사람입니다   ·   클릭하거나 1, 2 키")
 	_set_fps()
 
 
@@ -634,12 +635,12 @@ func _take_boon(i: int) -> void:
 ## All slots are taken: pick the one to forget (5 cancels).
 func _show_boon_drop() -> void:
 	_phase = Phase.BOON_DROP
-	var body := "'%s' 을(를) 익히려면 하나를 잊어야 합니다.\n\n" % _boon_offer[_boon_pending]["name"]
-	for k in _boons.size():
-		var b := Boons.get_boon(_boons[k])
-		body += "%d  %s\n     %s\n\n" % [k + 1, b["name"], b["text"]]
-	body += "5  취소"
-	_hud.show_card("기예가 가득 찼습니다", "무엇을 잊을까요", body, "1~4 키로 고르세요")
+	var opts := []
+	for id in _boons:
+		var b := Boons.get_boon(id)
+		opts.append({"title": b["name"], "tag": "", "text": b["text"], "note": ""})
+	_hud.show_choices("기예가 가득 찼습니다", "무엇을 잊을까요", opts,
+		"'%s' 을(를) 익히려면 하나를 잊어야 합니다" % _boon_offer[_boon_pending]["name"], "5   취소")
 
 
 func _drop_boon(k: int) -> void:
@@ -815,7 +816,13 @@ func _on_choice_picked(i: int) -> void:
 		Phase.DOOR:
 			_pick_door(i)
 		Phase.BOON:
-			_take_boon(i)
+			_take_boon(3 if i >= _boon_offer.size() else i)
+		Phase.UPGRADE:
+			_pick_upgrade(4 if i >= _boon_pending_list.size() else i)
+		Phase.BOON_DROP:
+			_drop_boon(4 if i >= _boons.size() else i)
+		Phase.CHOICE:
+			_choose("execute" if i == 0 else "spare")
 
 
 func _on_shoved() -> void:
@@ -892,12 +899,11 @@ func _trainable() -> Array:
 func _upgrade_menu() -> void:
 	_phase = Phase.UPGRADE
 	_boon_pending_list = _trainable()
-	var body := ""
-	for k in _boon_pending_list.size():
-		var b := Boons.get_boon(_boon_pending_list[k])
-		body += "%d  %s\n     %s\n\n" % [k + 1, b["name"], b["text"]]
-	body += "5  돌아간다"
-	_hud.show_card("수련", "어느 기예를 단련할까요", body, "키로 고르세요   (효과가 1.5배가 됩니다)")
+	var opts := []
+	for id in _boon_pending_list:
+		var b := Boons.get_boon(id)
+		opts.append({"title": b["name"], "tag": "", "text": b["text"], "note": ""})
+	_hud.show_choices("수련", "어느 기예를 단련할까요", opts, "클릭하거나 숫자 키   (효과가 1.5배가 됩니다)", "5   돌아간다")
 
 
 func _pick_upgrade(k: int) -> void:
