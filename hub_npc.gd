@@ -38,18 +38,12 @@ func setup(id: String, name_: String, outfit: String, look_at_target: Node3D) ->
 
 
 func _play() -> void:
-	var len: float = _body.clip_length("Idle_Loop")
-	if len > 0.0:
-		_body.act("Idle_Loop", 0.0, len, len, 0.2)
+	_body.stand_still()
 
 
 func _process(delta: float) -> void:
 	if _body == null:
 		return
-	_clip_t += delta
-	if _clip_t >= _body.clip_length("Idle_Loop"):
-		_clip_t = 0.0
-		_play()
 	_body.update_body(delta)
 	_body.pose(SwordPoses.make("relaxed"))
 	if is_instance_valid(target):

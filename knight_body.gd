@@ -28,7 +28,7 @@ const LIBRARIES := {
 	"ual2": "res://assets/characters/body/UAL2_Standard.glb",
 	"kay": "res://assets/characters/knight/Knight.glb",
 }
-const LOOPING := ["Sword_Idle", "Walk", "Jog_Fwd"]
+const LOOPING := ["Sword_Idle", "Walk", "Jog_Fwd", "Idle", "Idle_Talking"]
 # The guard the upper body holds while moving: the first frame of the "A" cut, upright
 # with the point toward the opponent (and the "A" cut starts from exactly this pose).
 const GUARD_CLIP := "ual2/Sword_Regular_A"
@@ -525,6 +525,11 @@ func act(clip: String, from: float, to: float, duration: float, fade := 0.1) -> 
 	tree.set("parameters/action_speed/scale", maxf((to - from) / maxf(duration, 0.01), 0.0))
 	_action_target = 1.0
 	_action_fade = 1.0 / maxf(fade, 0.01)
+
+
+## Stand still: the idle clip held on its first frame (feet together, arms down), not moving.
+func stand_still() -> void:
+	act("Idle", 0.0, 0.0, 1.0, 0.15)
 
 
 ## Keep the current action going at a new speed (e.g. from windup into the strike).

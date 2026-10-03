@@ -27,16 +27,16 @@ const ENTRANCE := {
 		{"cam": {"pos": Vector3(-2.2, 1.7, 8.6), "look": Vector3(0.0, 1.3, 2.0), "fov": 52.0, "drift": Vector3(0.12, 0.0, -0.1)},
 			"walk": {"rian": Vector3(0.0, 0.0, 3.0)}, "dur": 3.2},
 		{"cam": {"pos": Vector3(-1.3, 1.55, 4.6), "look": "doyun", "fov": 40.0},
-			"clip": {"doyun": "Idle_Talking_Loop"},
+			"clip": {"doyun": "Idle_Talking"},
 			"line": ["도윤", "공훈생이군. 짐이 가벼운 걸 보니."]},
 		{"cam": {"pos": Vector3(3.6, 1.5, 3.4), "look": "noble", "fov": 38.0},
-			"face": {"doyun": "noble"}, "clip": {"doyun": "", "noble": "Idle_Talking_Loop"},
+			"face": {"doyun": "noble"}, "clip": {"doyun": "", "noble": "Idle_Talking"},
 			"line": ["귀족 학생", "마구간 옆 방이라더니, 냄새가 먼저 오는군."]},
 		{"cam": {"pos": Vector3(1.2, 1.6, -0.6), "look": "rian", "fov": 38.0},
 			"face": {"doyun": "rian"}, "clip": {"noble": "", "doyun": ""},
 			"line": ["리안", "냄새는 저쪽이 더 나는데. 향수가 코를 찌르네."]},
 		{"cam": {"pos": Vector3(-1.0, 1.6, 3.8), "look": "doyun", "fov": 38.0},
-			"clip": {"doyun": "Idle_Talking_Loop"},
+			"clip": {"doyun": "Idle_Talking"},
 			"line": ["도윤", "마음에 들었다. ……한 가지만 알아 두게."]},
 		{"cam": {"pos": Vector3(-1.0, 1.6, 3.8), "look": "doyun", "fov": 34.0},
 			"line": ["도윤", "석차 1위, 수석에게는 왕실 기록관의 열람권이 주어지네. 전사자 기록까지."]},
@@ -44,7 +44,7 @@ const ENTRANCE := {
 			"clip": {"doyun": ""},
 			"line": ["리안", "……안개 골짜기."]},
 		{"cam": {"pos": Vector3(0.0, 1.5, 6.0), "look": "doyun", "fov": 50.0, "drift": Vector3(0.0, 0.0, -0.15)},
-			"clip": {"doyun": "Idle_Talking_Loop"}, "walk": {"doyun": Vector3(0.0, 0.0, -1.5)},
+			"clip": {"doyun": "Idle_Talking"}, "walk": {"doyun": Vector3(0.0, 0.0, -1.5)},
 			"line": ["도윤", "알고 왔군. 그럼 꼴찌부터 시작하세. 연무장으로."]},
 	],
 }
@@ -92,7 +92,7 @@ static func _line_beat(who: String, other: String, text: String) -> Dictionary:
 	var cam_z := 3.9 if listener == "rian" else -3.9
 	var cam_x := 1.0 if listener == "rian" else -1.0
 	return {"cam": {"pos": Vector3(cam_x, 1.65, cam_z), "look": who, "fov": 36.0},
-		"clip": {who: "Idle_Talking_Loop", listener: ""}, "line": [NAMES[who], text]}
+		"clip": {who: "Idle_Talking", listener: ""}, "line": [NAMES[who], text]}
 
 
 ## The graduation. Who stands in the courtyard depends on the choices made: Doyun if Rian
@@ -127,16 +127,16 @@ static func _ending(kind: String, flags: Dictionary) -> Dictionary:
 		doyun_line = "귀족 의회가 자네의 수석 자격을 문제 삼을 걸세. 그래도 후회하지 않나."
 		serafin_line = "증언대에 서겠어. 우리 가문의 인장이 찍힌 편지는 내가 가지고 있다."
 	beats.append({"cam": {"pos": Vector3(0.7, 1.65, 3.2), "look": "kaiden", "fov": 42.0},
-		"clip": {"kaiden": "Idle_Talking_Loop"}, "line": ["카이든", kaiden_line]})
+		"clip": {"kaiden": "Idle_Talking"}, "line": ["카이든", kaiden_line]})
 	if doyun_here:
 		beats.append({"cam": {"pos": Vector3(-0.8, 1.65, 2.0), "look": "doyun", "fov": 44.0},
-			"clip": {"kaiden": "", "doyun": "Idle_Talking_Loop"}, "line": ["도윤", doyun_line]})
+			"clip": {"kaiden": "", "doyun": "Idle_Talking"}, "line": ["도윤", doyun_line]})
 	else:
 		beats.append({"cam": wide, "clip": {"kaiden": ""},
 			"line": ["", "도윤은 후원자의 가문으로 돌아갔다. 그가 쓴 마지막 보고서에는 리안의 이름이 없었다고 한다."]})
 	if serafin_here:
 		beats.append({"cam": {"pos": Vector3(0.8, 1.65, 2.0), "look": "serafin", "fov": 44.0},
-			"clip": {"serafin": "Idle_Talking_Loop", "doyun": ""} if doyun_here else {"serafin": "Idle_Talking_Loop"},
+			"clip": {"serafin": "Idle_Talking", "doyun": ""} if doyun_here else {"serafin": "Idle_Talking"},
 			"line": ["세라핀", serafin_line]})
 	else:
 		beats.append({"cam": wide, "line": ["", "세라핀의 가문은 북문 사건의 책임을 졌다. 그녀는 그날 밤 이후 학교에서 보이지 않았다."]})

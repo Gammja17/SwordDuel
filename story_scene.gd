@@ -9,7 +9,7 @@ extends Node3D
 ##       {"cam": {"pos": Vector3, "look": Vector3 or actor id, "fov": 50.0, "drift": Vector3},
 ##        "walk": {id: Vector3}, "speed": 1.2,       # actors walk to a point (and stay there)
 ##        "face": {id: id or Vector3},               # turn toward
-##        "clip": {id: "Idle_Talking_Loop"},         # a full-body clip, looped
+##        "clip": {id: "Idle_Talking"},         # a full-body clip, looped
 ##        "line": ["name", "what they say"],         # waits for a click
 ##        "dur": 2.0},                               # a beat with no line lasts this long
 ##     ],
@@ -136,7 +136,7 @@ func _next() -> void:
 		_actors[id].clip = b["clip"][id]
 		_actors[id].clip_t = 0.0
 		if _actors[id].clip == "":
-			_actors[id].clip = "Idle_Loop"   # back to standing easy
+			_actors[id].clip = "Idle"   # back to standing easy
 		_play_clip(id)
 	if b.has("choice"):
 		_start_choice(b["choice"])
@@ -198,7 +198,7 @@ func _add_actor(id: String, spec: Dictionary) -> void:
 	body.position = spec.get("at", Vector3.ZERO)
 	body._two_hands = 0.0   # the left hand hangs free
 	body._grip_hands.open_left = true
-	var a := {"body": body, "goal": null, "clip": "Idle_Loop", "clip_t": 0.0, "walking": false, "pose": spec.get("pose", "relaxed")}
+	var a := {"body": body, "goal": null, "clip": "Idle", "clip_t": 0.0, "walking": false, "pose": spec.get("pose", "relaxed")}
 	_actors[id] = a
 
 
@@ -218,6 +218,9 @@ func _face(id: String, target: Variant) -> void:
 
 func _play_clip(id: String) -> void:
 	var a: Dictionary = _actors[id]
+	if a.clip == "Idle":
+		a.body.stand_still()   # standing easy means standing still
+		return
 	var len: float = a.body.clip_length(a.clip)
 	if len > 0.0:
 		a.body.act(a.clip, 0.0, len, len, 0.3)
