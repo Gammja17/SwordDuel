@@ -18,10 +18,11 @@ const Scenes := preload("res://scenes.gd")
 const StoryScene := preload("res://story_scene.gd")
 const Boons := preload("res://boons.gd")
 const Schools := preload("res://schools.gd")
+const Classes := preload("res://classes.gd")
 const HubPlayerScript := preload("res://hub_player.gd")
 const HubNpcScript := preload("res://hub_npc.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, DOOR, HELP, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, CLASS, SCHOOL, PATH, UPGRADE, DOOR, HELP, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -63,6 +64,7 @@ var _boons: Array = []        # ids of the learned techniques (saved)
 var _boon_offer: Array = []
 var _boon_next := 0
 var _boon_pending := 0
+var _class := ""              # the way the sword is carried this term (classes.gd)
 var _school := ""             # the fighting style this run is built around (saved)
 var _boon_lvls := {}          # id -> level of trained techniques (saved)
 var _boon_pending_list: Array = []
@@ -161,6 +163,7 @@ func _process(delta: float) -> void:
 		Phase.FIGHT, Phase.OUTCOME, Phase.PRACTICE:
 			if is_instance_valid(_player) and is_instance_valid(_opponent):
 				_hud.set_enemy_hp(_opponent.hp / _opponent.max_hp)
+				_hud.set_ability(_player.ability_text())
 				_hud.set_player(_player.hp / 100.0, _player.posture / 100.0, _player.hurt_flash, _player.breath / 100.0)
 				match _player.special_available():
 					"execute":
@@ -217,6 +220,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_take_boon(2)
 		elif bk == KEY_4:
 			_take_boon(3)
+		return
+	if _phase == Phase.CLASS and event is InputEventKey and event.pressed and not event.is_echo():
+		var ck := (event as InputEventKey).physical_keycode
+		if ck >= KEY_1 and ck <= KEY_3:
+			_pick_class(ck - KEY_1)
 		return
 	if (_phase == Phase.SCHOOL or _phase == Phase.PATH) and event is InputEventKey and event.pressed and not event.is_echo():
 		var sk := (event as InputEventKey).physical_keycode
@@ -774,6 +782,35 @@ func _school_rank() -> int:
 
 # --- 유파, 길, 수련, 정예 도전 -----------------------------------------------------------------
 
+## Before the school: how to carry the sword this term.
+func _class_menu(stage: int) -> void:
+	_phase = Phase.CLASS
+	_boon_next = stage
+	_clear_duel()
+	_title_cam.current = true
+	_hud.show_fight_ui(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var body := ""
+	for i in Classes.ORDER.size():
+		var c: Dictionary = Classes.ALL[Classes.ORDER[i]]
+		body += "%d  %s  ·  %s\n     %s\n     %s\n\n" % [i + 1, c["name"], c["tag"], c["text"], c["ability_text"]]
+	_hud.show_card("전직을 고르세요", "어떻게 검을 쥘 것인가", body.strip_edges(), "1, 2, 3 키로 고르세요   (이번 학기 동안 바뀌지 않습니다)")
+	_set_fps()
+
+
+func _pick_class(i: int) -> void:
+	if i >= Classes.ORDER.size():
+		return
+	_class = Classes.ORDER[i]
+	_hud.popup(Classes.ALL[_class]["name"], GOLD)
+	_begin_stage(_boon_next)
+
+
+func _on_shoved() -> void:
+	_hud.popup("밀쳤다!", GOLD)
+	_hitstop(0.06)
+
+
 ## Before the first duel: choose the school this run is built around.
 func _school_menu(stage: int) -> void:
 	_phase = Phase.SCHOOL
@@ -1034,6 +1071,7 @@ func _start_run() -> void:
 	_boons = []
 	_boon_lvls = {}
 	_school = ""
+	_class = ""
 	_tries = {}
 	_stats = _new_stats()
 	_totals = _new_stats()
@@ -1151,6 +1189,7 @@ func _reset_campaign() -> void:
 	_boons = []
 	_boon_lvls = {}
 	_school = ""
+	_class = ""
 	_tries = {}
 	_seen = {}
 	_meta = {"pts": 0, "runs": 0, "best_stage": 0, "up": {}}
@@ -1160,6 +1199,9 @@ func _reset_campaign() -> void:
 ## Cutscenes before the duel, then the duel's card.
 func _begin_stage(i: int) -> void:
 	_elite = false
+	if _class == "":
+		_class_menu(i)
+		return
 	if _school == "":
 		_school_menu(i)
 		return
@@ -1190,6 +1232,7 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 	_flags["school"] = maxi(Schools.ORDER.find(_school), 0)   # scene lines can react to the school
 	s.flags = _flags
 	s.speed = float(_prefs["text"])
+	s.hero_kit = _class if _class != "" else "two"
 	s.hero_outfit = "player_f" if int(_prefs["hero"]) == 1 else "player"
 	add_child(s)
 	s.finished.connect(func():
@@ -1222,6 +1265,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 
 	_player = PlayerScript.new()
 	_player.name = "Player"
+	_player.kit = _class if _class != "" else "two"
 	add_child(_player)
 	_player.position = Vector3(0.0, 0.0, 2.0)
 	_player.sens = float(_prefs["sens"])
@@ -1235,6 +1279,7 @@ func _spawn_duel(tier: Dictionary) -> void:
 	_player.special_struck.connect(_on_special_struck)
 	_player.execution_started.connect(_on_execution_started)
 	_player.hurt.connect(_on_player_hurt)
+	_player.shoved_target.connect(_on_shoved)
 	_player.lock_changed.connect(_on_lock_changed)
 	_player.died.connect(_on_player_died)
 
@@ -1760,7 +1805,7 @@ func _make_rain() -> void:
 func _player_mods(stage: int) -> Dictionary:
 	var m := Boons.mods_of(_boons, _boon_lvls)
 	var school := Schools.mods_for(_school, Boons.count_school(_boons, _school))
-	for src in [school, Campaign.place_of(stage).get("mods", {}), _meta_mods()]:
+	for src in [school, Classes.mods_for(_class), Campaign.place_of(stage).get("mods", {}), _meta_mods()]:
 		for k in src:
 			m[k] = float(m.get(k, 0.0)) + float(src[k])
 	return m
@@ -1768,6 +1813,8 @@ func _player_mods(stage: int) -> Dictionary:
 
 func _status_text() -> String:
 	var s := Campaign.grade_name(int(_meta.get("total", 0))) + "   ·   "
+	if _class != "":
+		s += Classes.ALL[_class]["name"] + "   ·   "
 	if _school != "":
 		s += Schools.ALL[_school]["name"] + "   ·   "
 	s += "석차 %d위" % _rank

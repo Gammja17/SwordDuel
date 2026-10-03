@@ -294,6 +294,19 @@ func _bash() -> void:
 	bashed.emit()
 
 
+## The player's shield shove: it reels back a step.
+func shoved(dir: Vector3) -> void:
+	if _state == State.DEAD or _state == State.HELD:
+		return
+	_in_combo = false
+	_enter(State.STAGGER)
+	_timer = 0.9
+	_push = dir.normalized() * 2.6
+	_recoil = 1.3
+	_recoil_side = 0.0
+	Sfx.play("block", global_position + Vector3(0.0, 1.0, 0.0), 3.0)
+
+
 ## A blow that will break a block (the overhead smash).
 func heavy_blow() -> bool:
 	return _kind == "smash" and is_striking()
@@ -400,6 +413,7 @@ func _physics_process(delta: float) -> void:
 	_overswing_cd -= delta
 	_clock += delta
 	_body.update_body(delta)
+	_body.set_glow(_kind if _state == State.WINDUP and (_kind == "smash" or _kind == "bash") else "")
 	if _state == State.DEAD:
 		velocity = Vector3(0.0, velocity.y - GRAVITY * delta, 0.0)
 		move_and_slide()

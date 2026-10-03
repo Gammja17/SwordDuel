@@ -38,6 +38,7 @@ var _has_line := false
 var _speed := WALK_SPEED
 var _drift := Vector3.ZERO
 var _look: Variant = null    # where the camera looks: a point, or an actor id
+var hero_kit := "two"           # the protagonist's class
 var hero_outfit := "player"   # the protagonist's look (a setting)
 var speed := 1.0              # the text speed setting
 var _done := false
@@ -197,7 +198,7 @@ func _add_actor(id: String, spec: Dictionary) -> void:
 	add_child(body)
 	body.build(spec.get("tabard", Color()), spec.get("crest", false), hero_outfit if id == "rian" else spec.get("outfit", "squire"))
 	body.position = spec.get("at", Vector3.ZERO)
-	body.set_kit(spec.get("kit", "two"))
+	body.set_kit(hero_kit if id == "rian" else spec.get("kit", "two"))
 	body.at_ease()   # the left hand hangs free
 	var a := {"body": body, "goal": null, "clip": "Idle", "clip_t": 0.0, "walking": false, "pose": spec.get("pose", "relaxed")}
 	_actors[id] = a

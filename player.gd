@@ -8,6 +8,7 @@ extends CharacterBody3D
 ## front, the body turning and stepping into it. The speed of the tip is what cuts
 ## (sword.gd).
 
+signal shoved_target   # the shield shove reached the opponent
 signal hurt(amount: float)
 signal died
 signal lock_changed(locked: bool)
@@ -140,6 +141,7 @@ var practice := false  # in the practice bout, hits are shown but cost no health
 var alive := true
 var hp := 100.0
 var sens := 1.0   # the mouse sensitivity setting
+var kit := "two"   # 전직 (classes.gd), set before the player enters the scene
 var mods := {}   # the owned boons' effects added up (boons.gd)
 var hurt_flash := 0.0
 var posture := 0.0
@@ -154,6 +156,12 @@ var _deflect_timer := 0.0   # after a clash the blade bounces and control is dam
 var _deflect_damp := 1.0    # ... to this share of the mouse
 var _guard_goal := Vector2.ZERO
 var _guard_pull := 0.0
+var _shield: Node3D
+var _ability_cd := 0.0
+var _cut_boost := 1.0
+var _lunge_t := -1.0
+var _lunge_dir := Vector3.ZERO
+var _lunge_hit := false
 var _guard_blend := 0.0     # 0 blade where the mouse holds it .. 1 in the guard stance
 var _guard_recoil := 0.0    # 1 just after a block: the hands are shoved back
 var _parry_swing := 0.0     # +-1 while the parry snap plays (its direction), else 0
@@ -221,6 +229,8 @@ func _ready() -> void:
 	# Our own arms: mail sleeves, plate forearms, gauntlets.
 	_arm_r = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.cloth(Color(0.20, 0.17, 0.14)), Armor.leather(), Armor.leather(), false)
 	_arm_l = ArmScript.new(self, UPPER_ARM, FOREARM, Armor.cloth(Color(0.20, 0.17, 0.14)), Armor.leather(), Armor.leather(), false)
+	if kit == "shield":
+		_build_shield()
 
 	sword = SwordScript.new()
 	sword.name = "Sword"
@@ -257,6 +267,10 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and not event.is_echo() \
 			and (event as InputEventKey).physical_keycode == KEY_SPACE:
 		_try_dodge()
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.is_echo() \
+			and (event as InputEventKey).physical_keycode == KEY_Q:
+		try_class_special()
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and not event.is_echo() \
 			and (event as InputEventKey).physical_keycode == KEY_E:
@@ -515,6 +529,8 @@ func _physics_process(delta: float) -> void:
 	var move := global_transform.basis * local
 	if _special != "":
 		move = _special_step()
+	if _lunge_t >= 0.0:
+		move = _lunge_step(delta)
 	if _dodge_t >= 0.0:
 		# A dodge overrides walking: fast at first, easing off.
 		_dodge_t += delta
@@ -541,6 +557,7 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		return
 
+	_ability_cd = maxf(_ability_cd - delta, 0.0)
 	_update_breath(delta)
 	_guard_blend = move_toward(_guard_blend, 1.0 if _guard_held and not in_bind else 0.0, delta * 9.0)
 	_guard_recoil = maxf(_guard_recoil - delta * 5.0, 0.0)
@@ -569,6 +586,9 @@ func _physics_process(delta: float) -> void:
 	var blade_basis := sword.transform.basis
 	_arm_r.pose(SHOULDER_R - dip, grip, Vector3(1.0, -0.35, 0.0), blade_basis)
 	var left_hand := grip - dir * SwordMesh.LEFT_HAND
+	if _shield != null:
+		_shield.position = _shield_pos() - dip
+		left_hand = _shield.position + Vector3(0.0, -0.02, 0.14)   # the left hand is in the shield's strap
 	if _special == "execute" and _sp_t < _sp_end(3) and target != null:
 		left_hand = to_local(_grab_point())   # the left hand has hold of them
 	_arm_l.pose(SHOULDER_L - dip, left_hand, Vector3(-1.0, -0.35, 0.0), blade_basis)
@@ -863,8 +883,122 @@ func grab_point() -> Vector3:
 ## Our own arms and sword, hidden while an execution is shown from outside.
 func set_first_person_visible(on: bool) -> void:
 	sword.visible = on
+	if _shield != null:
+		_shield.visible = on
 	_arm_r.set_visible(on)
 	_arm_l.set_visible(on)
+
+
+# --- 전직: the shield on the left arm, and the Q move --------------------------------------------
+
+const KAY_SCENE := "res://assets/characters/knight/Knight.glb"
+const SHIELD_REST := Vector3(-0.40, 1.14, -0.52)
+const SHIELD_GUARD := Vector3(-0.02, 1.30, -0.55)
+const ABILITY_COST := 20.0
+const ABILITY_COOLDOWN := {"two": 7.0, "one": 5.0, "shield": 7.0}
+const ABILITY_NAME := {"two": "내려찍기", "one": "돌진 찌르기", "shield": "방패 밀치기"}
+const LUNGE_TIME := 0.26
+const LUNGE_SPEED := 11.0
+
+
+## A shield held up on the left arm (KayKit's round shield, CC0).
+func _build_shield() -> void:
+	if not ResourceLoader.exists(KAY_SCENE):
+		return
+	var src := (load(KAY_SCENE) as PackedScene).instantiate()
+	var found := src.find_child("Round_Shield", true, false) as MeshInstance3D
+	if found != null:
+		_shield = MeshInstance3D.new()
+		(_shield as MeshInstance3D).mesh = found.mesh
+		(_shield as MeshInstance3D).material_override = Armor.two_sided(Armor.steel())
+		add_child(_shield)
+		_shield.scale = Vector3.ONE * 0.38
+		_shield.rotation_degrees = Vector3(-8.0, 180.0, 0.0)
+		_shield.position = SHIELD_REST
+	src.free()
+
+
+## Where the shield is: low at the side, and in front of the chest when guarding; shoved back by
+## a block and swung out by a parry.
+func _shield_pos() -> Vector3:
+	var p := SHIELD_REST.lerp(SHIELD_GUARD, _guard_blend)
+	p.z += 0.14 * _guard_recoil
+	if _parry_p < 1.0:
+		p.x += _parry_swing * sin(PI * _parry_p) * 0.28
+	return p
+
+
+func ability_text() -> String:
+	var n: String = ABILITY_NAME.get(kit, "")
+	if _ability_cd > 0.0:
+		return "Q  %s   %.1f" % [n, _ability_cd]
+	if breath < ABILITY_COST:
+		return "Q  %s   (숨 부족)" % n
+	return "Q  " + n
+
+
+## Q: the move of this fighter's kind. A sword and two hands bring the blade down overhead; a
+## light sword drives in; a shield shoves.
+func try_class_special() -> void:
+	if not active or not alive or in_bind or _special != "" or _dodge_t >= 0.0 or _ability_cd > 0.0 \
+			or breath < ABILITY_COST or _lunge_t >= 0.0 or target == null:
+		return
+	match kit:
+		"two":
+			if _guard_held:
+				return
+			_cut_boost = 1.7
+			_cut_gap = 0.0
+			request_cut(Vector2(0.0, -1.0))
+			if _cut_t < 0.0:
+				_cut_boost = 1.0
+				return
+		"one":
+			var fwd := target.global_position - global_position
+			fwd.y = 0.0
+			_lunge_dir = fwd.normalized() if fwd.length() > 0.1 else -global_transform.basis.z
+			_lunge_t = 0.0
+			_lunge_hit = false
+			_abort_cut()
+			Sfx.play_flat("swing", 2.0)
+		"shield":
+			var to := target.global_position - global_position
+			to.y = 0.0
+			Sfx.play_flat("block", 1.0)
+			add_trauma(0.25)
+			_guard_recoil = 1.0
+			if to.length() <= 2.1 and target.has_method("shoved"):
+				target.shoved(to.normalized())
+				shoved_target.emit()
+			else:
+				_ability_cd = 1.5   # nothing there: only a short wait, no cost
+				return
+	_ability_cd = float(ABILITY_COOLDOWN.get(kit, 6.0))
+	breath = maxf(breath - ABILITY_COST, 0.0)
+
+
+## The sword asks how hard the next cut is (a smash is worth more, once).
+func take_cut_boost() -> float:
+	var b := _cut_boost
+	_cut_boost = 1.0
+	return b
+
+
+## While the thrust carries the player forward: where they go, and what they hit.
+func _lunge_step(delta: float) -> Vector3:
+	_lunge_t += delta
+	_cut_kick = 1.0 - clampf(_lunge_t / LUNGE_TIME, 0.0, 1.0)
+	if not _lunge_hit and is_instance_valid(target) and global_position.distance_to(target.global_position) < 1.55:
+		_lunge_hit = true
+		var at: Vector3 = target.global_position + Vector3(0.0, 1.2, 0.0)
+		var strength := 9.0 * (1.0 + mod("cut_power"))
+		target.receive_cut(strength, at, _lunge_dir)
+		sword.cut_registered.emit(strength, at)
+		add_trauma(0.35)
+	if _lunge_t >= LUNGE_TIME:
+		_lunge_t = -1.0
+		_cut_kick = 0.0
+	return _lunge_dir * LUNGE_SPEED * (1.0 - 0.5 * clampf(_lunge_t / LUNGE_TIME, 0.0, 1.0))
 
 
 ## When phase i of the current special move ends (seconds into it).

@@ -143,6 +143,8 @@ var _left_on_sword: Node3D
 var _grab_node: Node3D     # where the left hand grips someone, when it lets go of the sword
 var _two_hands := 1.0
 var _kit := "two"
+var _blade_mat: StandardMaterial3D
+var _shield_mat: StandardMaterial3D
 
 
 func build(tabard_color: Color, crest: bool, outfit := "") -> void:
@@ -237,7 +239,8 @@ func _dress(tabard_color: Color, crest: bool) -> void:
 
 
 func _hold_sword(fittings: Material, grip_mat: Material) -> void:
-	sword = SwordMesh.build(Armor.blade(), fittings, grip_mat)
+	_blade_mat = Armor.blade().duplicate() as StandardMaterial3D   # (its own, so a glow does not light every sword)
+	sword = SwordMesh.build(_blade_mat, fittings, grip_mat)
 	var grip := _attach("RightHand")
 	grip.add_child(sword)
 	sword.transform = SWORD_IN_HAND
@@ -575,7 +578,23 @@ func set_kit(kind: String) -> void:
 		_two_hands = 0.0
 		_grip_hands.left_target = null   # the free hand is not turned to the grip
 	if kind == "shield":
-		_kay_piece("Round_Shield", "LeftLowerArm", SHIELD_POS, SHIELD_ROT, Vector3.ONE * 0.68, Armor.two_sided(Armor.steel()))
+		_shield_mat = Armor.two_sided(Armor.steel()).duplicate() as StandardMaterial3D
+		_kay_piece("Round_Shield", "LeftLowerArm", SHIELD_POS, SHIELD_ROT, Vector3.ONE * 0.68, _shield_mat)
+
+
+## A warning glow while a big move is drawn back: the blade red for a smash, the shield gold
+## for a bash. "" turns it off.
+func set_glow(move: String) -> void:
+	var blade := move == "smash"
+	var shield := move == "bash"
+	if _blade_mat != null:
+		_blade_mat.emission_enabled = blade
+		_blade_mat.emission = Color(1.0, 0.18, 0.08)
+		_blade_mat.emission_energy_multiplier = 2.4
+	if _shield_mat != null:
+		_shield_mat.emission_enabled = shield
+		_shield_mat.emission = Color(1.0, 0.75, 0.2)
+		_shield_mat.emission_energy_multiplier = 2.0
 
 
 func at_ease() -> void:

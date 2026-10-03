@@ -52,6 +52,7 @@ var _pref_controls := {}
 var _reset_button: Button
 var _reset_armed := false
 var _status: Label
+var _ability: Label
 
 const BAR_W := 420.0
 
@@ -152,6 +153,7 @@ func show_fight_ui(on: bool, show_enemy := true) -> void:
 	_enemy_box.visible = on and show_enemy
 	_player_box.visible = on
 	_status.visible = on and _status.text != ""
+	_ability.visible = on and _ability.text != ""
 
 
 ## Bind contest: balance -1 (losing) .. +1 (winning); push_dir is the way the player
@@ -692,7 +694,27 @@ func _build_title() -> void:
 	_title_root.add_child(_title_status)
 
 
+func set_ability(text: String) -> void:
+	_ability.text = text
+	_ability.visible = text != "" and _player_box.visible
+	_ability.modulate.a = 1.0 if text.length() < 12 or not ("." in text) else 0.55
+
+
 func _build_status() -> void:
+	_ability = Label.new()
+	_ability.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_ability.offset_left = -330.0
+	_ability.offset_top = -60.0
+	_ability.offset_right = -28.0
+	_ability.offset_bottom = -22.0
+	_ability.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_ability.add_theme_font_size_override("font_size", 22)
+	_ability.add_theme_color_override("font_color", Color(0.98, 0.86, 0.5))
+	_ability.add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.02))
+	_ability.add_theme_constant_override("outline_size", 6)
+	_ability.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ability.visible = false
+	_root.add_child(_ability)
 	_status = Label.new()
 	_status.position = Vector2(24, 20)
 	_status.add_theme_font_size_override("font_size", 18)
