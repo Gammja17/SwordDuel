@@ -96,6 +96,40 @@ const STAGES := [
 ]
 
 
+# Bought in the dormitory's training hall with 수련 점수, kept across runs. `mods` are per level.
+const UPGRADES := [
+	{"id": "body", "name": "단련된 몸", "max": 3, "base": 30, "text": "받는 피해가 단계마다 4% 줄어듭니다.",
+		"mods": {"damage_taken": -0.04}},
+	{"id": "lungs", "name": "깊은 숨", "max": 3, "base": 30, "text": "숨이 단계마다 12% 빨리 찹니다.",
+		"mods": {"breath": 0.12}},
+	{"id": "eye", "name": "쳐내기 감각", "max": 3, "base": 40, "text": "쳐내기 받아낼 시간이 단계마다 0.02초 늘어납니다.",
+		"mods": {"parry_window": 0.02}},
+	{"id": "edge", "name": "칼 수련", "max": 3, "base": 40, "text": "베기 위력이 단계마다 4% 세집니다.",
+		"mods": {"cut_power": 0.04}},
+	{"id": "gift", "name": "스승의 선물", "max": 1, "base": 80, "text": "학기를 시작할 때 고른 유파의 기예 하나를 이미 익힌 채로 시작합니다.",
+		"mods": {}},
+]
+
+# Said in the dormitory yard. `min`: the best stage reached so far; `flag`/`val`: a choice made.
+const HUB_TALKS := [
+	{"min": 0, "who": "도윤", "text": "첫 학기는 누구나 꼴찌에서 시작하네. 쓰러져도 부끄러운 일이 아니야. 일어나게."},
+	{"min": 0, "who": "무진", "text": "공훈생은 살아남는 법부터 배운다. 쓰러진 날이 가장 많이 배우는 날이다."},
+	{"min": 1, "who": "태산", "text": "한 칸 올랐다고 으스대지 마라. 한 칸이 제일 비싸다고 했잖아."},
+	{"min": 2, "who": "레온", "text": "서혁이 네 얘기를 하더라. 칼이 이상하게 무겁다나. 칭찬이야, 아마."},
+	{"min": 3, "who": "무진", "text": "네 칼이 이기는 법을 묻기 시작했군. 좋은 징조다. 위험한 징조이기도 하고."},
+	{"min": 4, "who": "세라핀", "text": "카이든이 한밤에 혼자 칼을 휘두르는 걸 봤어. 너 때문이야. ……그 애가 그러는 건 처음 봐."},
+	{"min": 5, "who": "도윤", "text": "북쪽에서 전쟁이 곧이라는 소문이 돌아. 졸업시험이 열리긴 할까."},
+	{"min": 0, "who": "도윤", "text": "……나를 아직 믿지 못하겠지. 그래도 괜찮네. 칼로 갚을 날을 기다리겠네.", "flag": "doyun_trust", "val": 1},
+	{"min": 0, "who": "도윤", "text": "자네가 나를 용서해 줘서 이 학교가 덜 춥네. 고맙네.", "flag": "doyun_trust", "val": 0},
+]
+
+
+static func upgrade_cost(u: Dictionary, level: int) -> int:
+	if level >= int(u["max"]):
+		return -1
+	return int(u["base"]) * (level + 1)
+
+
 static func count() -> int:
 	return STAGES.size()
 

@@ -19,7 +19,7 @@ const StoryScene := preload("res://story_scene.gd")
 const Boons := preload("res://boons.gd")
 const Schools := preload("res://schools.gd")
 
-enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, CREDITS }
+enum Phase { TITLE, INTRO, FIGHT, OUTCOME, FINAL, PRACTICE, PRACTICE_DONE, SCENE, CHOICE, BOON, BOON_DROP, SCHOOL, PATH, UPGRADE, HUB, HUB_TRAIN, HUB_TALK, RUN_END, CREDITS }
 
 const ARENA_HALF := 8.0
 const WALL_HEIGHT := 1.3
@@ -65,6 +65,8 @@ var _school := ""             # the fighting style this run is built around (sav
 var _boon_lvls := {}          # id -> level of trained techniques (saved)
 var _boon_pending_list: Array = []
 var _tries := {}              # how many times each stage has beaten the player this run
+var _meta := {"pts": 0, "runs": 0, "best_stage": 0, "up": {}}   # kept across runs (saved)
+var _seen := {}               # cutscenes already shown: they play once (saved)
 var _elite := false           # the current duel is a duel of vengeance
 var _place := "dusk"          # the light and weather of the current duel (campaign.gd PLACES)
 var _rain: Node
@@ -178,6 +180,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		_reset_campaign()
 		_to_title()
 		return
+	if _phase == Phase.HUB and event is InputEventKey and event.pressed and not event.is_echo():
+		var hk := (event as InputEventKey).physical_keycode
+		if hk >= KEY_1 and hk <= KEY_3:
+			_pick_hub(hk - KEY_1)
+		return
+	if _phase == Phase.HUB_TRAIN and event is InputEventKey and event.pressed and not event.is_echo():
+		var tk := (event as InputEventKey).physical_keycode
+		if tk == KEY_0:
+			_buy_upgrade(-1)
+		elif tk >= KEY_1 and tk <= KEY_5:
+			_buy_upgrade(tk - KEY_1)
+		return
 	if _phase == Phase.BOON and event is InputEventKey and event.pressed and not event.is_echo():
 		var bk := (event as InputEventKey).physical_keycode
 		if bk == KEY_1:
@@ -229,14 +243,16 @@ func _advance() -> void:
 			if not _entrance_seen:
 				_entrance_seen = true
 				_save_progress()
-				_run_scenes(["entrance"], _start_practice if not _practice_done else _begin_stage.bind(_stage))
+				_run_scenes(["entrance"], _start_practice if not _practice_done else _to_hub)
 			elif _practice_done:
-				_begin_stage(_stage)
+				_to_hub()
 			else:
 				_start_practice()
 		Phase.PRACTICE_DONE:
 			_totals = _new_stats()
-			_begin_stage(_stage)
+			_to_hub()
+		Phase.HUB_TALK, Phase.RUN_END:
+			_to_hub()
 		Phase.INTRO:
 			_start_fight()
 		Phase.OUTCOME:
@@ -254,12 +270,12 @@ func _advance() -> void:
 				else:
 					_choose(_ending)
 			else:
-				_intro(_tier)
+				_run_end_card()   # beaten: the term is over
 		Phase.FINAL:
 			_credits()
 		Phase.CREDITS:
-			_reset_campaign()
-			_to_title()
+			_meta["wins"] = int(_meta.get("wins", 0)) + 1
+			_run_end_card()
 
 
 func _to_title() -> void:
@@ -276,12 +292,13 @@ func _to_title() -> void:
 	_hud.clear_hint()
 	_hud.clear_task()
 	_hud.hide_bind()
-	var standing := "" if _stage == 0 else "\n\n현재 석차 %d위 · %d번째 상대 앞" % [_rank, _stage + 1]
-	if not _boons.is_empty():
-		standing += "\n익힌 기예: " + _boon_names()
+	var standing := ""
+	if int(_meta.get("runs", 0)) > 0:
+		standing = "\n\n%d번째 학기까지 치렀습니다 · 최고 기록 %d번째 상대 · 수련 점수 %d" % [
+			int(_meta.get("runs", 0)), int(_meta.get("best_stage", 0)), int(_meta.get("pts", 0))]
 	_hud.show_card("왕립 철검관 · 1대1 검술 결투", "진검승부",
 		"마우스로 칼을 휘둘러 싸웁니다.\n좌클릭이나 세게 휘두르면 크게 벱니다\nW 다가서기, S 물러나기, A와 D 옆걸음\n스페이스 구르기, 우클릭 막기와 쳐내기\n쳐낸 뒤 E를 누르면 치명타, 거의 쓰러진 상대는 처형\n휠 클릭 락온 켜고 끄기\n순위전을 이겨 수석으로 졸업하세요." + standing,
-		("클릭하면 " + ("이어합니다" if _stage > 0 else "시작합니다") + "\nP 연습 다시 · N 처음부터") if _practice_done else "클릭하면 시작합니다")
+		"클릭하면 기숙사로 들어갑니다\nP 연습 다시 · N 모든 기록 지우기" if _practice_done else "클릭하면 시작합니다")
 	_click_ready_at = Time.get_ticks_msec() + 300
 	_set_fps()
 
@@ -398,12 +415,8 @@ func _outcome() -> void:
 		_hud.show_card("승리", name_, name_ + _obj_particle(name_) + " 쓰러뜨렸습니다." + moved + "\n\n" + _stats_line(_stats),
 			"클릭하면 이야기가 이어집니다")
 	else:
-		var before := _rank
-		_rank = Campaign.rank_after_loss(_tier, _rank)
-		_save_progress()
-		var moved := "" if _rank == before else "\n석차가 %d위에서 %d위로 내려갔습니다." % [before, _rank]
-		_hud.show_card("패배", name_, name_ + "에게 쓰러졌습니다." + moved + "\n\n" + _stats_line(_stats) + "\n\n" + _advice(),
-			"클릭하면 다시 겨룹니다")
+		_hud.show_card("패배", name_, name_ + "에게 쓰러졌습니다. 이번 학기는 여기까지입니다.\n\n" + _stats_line(_stats) + "\n\n" + _advice(),
+			"클릭하면 수련 기록을 봅니다")
 	_click_ready_at = Time.get_ticks_msec() + 700
 	_set_fps()
 
@@ -568,6 +581,10 @@ func _pick_school(i: int) -> void:
 	if i >= Schools.ORDER.size():
 		return
 	_school = Schools.ORDER[i]
+	if int(_meta["up"].get("gift", 0)) > 0:
+		var gifts := Boons.roll(_boons, _school, 3).filter(func(b): return b["school"] == _school and not b.get("rare", false))
+		if not gifts.is_empty():
+			_boons.append(gifts[0]["id"])
 	_save_progress()
 	_hud.popup(Schools.ALL[_school]["name"], GOLD)
 	_begin_stage(_boon_next)
@@ -632,6 +649,130 @@ func _pick_upgrade(k: int) -> void:
 	_begin_stage(_boon_next)
 
 
+# --- 기숙사 (거점), 런, 영구 성장 -----------------------------------------------------------------
+
+## The dormitory: where every run starts and ends. Start a term, train for good with the
+## points earned, or talk (what is said depends on how far you have got).
+func _to_hub() -> void:
+	_phase = Phase.HUB
+	_elite = false
+	_clear_duel()
+	_set_war(false)
+	_set_place("dusk")
+	_title_cam.current = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_hud.show_fight_ui(false)
+	_hud.clear_hint()
+	_hud.clear_task()
+	_hud.hide_bind()
+	var best := int(_meta.get("best_stage", 0))
+	var top := "최고 기록: %d번째 상대까지" % best if best > 0 else "아직 첫 결투도 이기지 못했습니다"
+	var body := "1  학기를 시작한다\n     꼴찌에서 다시 올라갑니다. 기예와 유파는 새로 고릅니다.\n\n"
+	body += "2  훈련장\n     수련 점수로 영구히 강해집니다.\n\n"
+	body += "3  이야기를 나눈다\n\n"
+	body += "수련 점수 %d     %d번째 학기     %s" % [int(_meta.get("pts", 0)), int(_meta.get("runs", 0)) + 1, top]
+	_hud.show_card("기숙사", "공훈생 숙소", body, "1, 2, 3 키로 고르세요")
+	_set_fps()
+
+
+func _pick_hub(i: int) -> void:
+	match i:
+		0:
+			_start_run()
+		1:
+			_show_training()
+		2:
+			_hub_talk()
+
+
+func _start_run() -> void:
+	_meta["runs"] = int(_meta.get("runs", 0)) + 1
+	_stage = 0
+	_rank = Campaign.START_RANK
+	_ending = ""
+	_boons = []
+	_boon_lvls = {}
+	_school = ""
+	_tries = {}
+	_stats = _new_stats()
+	_totals = _new_stats()
+	_save_progress()
+	_begin_stage(0)   # (no school yet: it is picked first)
+
+
+## A run is over (beaten, or won): points for how far it got, then back to the dormitory.
+func _run_end_card() -> void:
+	_phase = Phase.RUN_END
+	var cleared := _stage
+	var pts := cleared * 10 + int(_totals.get("parries", 0)) * 2 + int(_totals.get("cuts", 0))
+	if _ending != "":
+		pts += 100
+	_meta["pts"] = int(_meta.get("pts", 0)) + pts
+	_meta["best_stage"] = maxi(int(_meta.get("best_stage", 0)), cleared)
+	_save_progress()
+	var body := "이긴 상대 %d명   최종 석차 %d위\n\n수련 점수 +%d   (합계 %d)" % [cleared, _rank, pts, int(_meta["pts"])]
+	if not _boons.is_empty():
+		body += "\n\n익힌 기예: " + _boon_names()
+	_hud.show_card("학기가 끝났습니다", "수련 기록", body, "클릭하면 기숙사로 돌아갑니다")
+	_click_ready_at = Time.get_ticks_msec() + 700
+	_set_fps()
+
+
+func _show_training() -> void:
+	_phase = Phase.HUB_TRAIN
+	var body := ""
+	for i in Campaign.UPGRADES.size():
+		var u: Dictionary = Campaign.UPGRADES[i]
+		var lvl := int(_meta["up"].get(u["id"], 0))
+		var cost := Campaign.upgrade_cost(u, lvl)
+		var tag := "  (최고 단계)" if cost < 0 else "  [%d점]" % cost
+		body += "%d  %s  %d/%d%s\n     %s\n\n" % [i + 1, u["name"], lvl, u["max"], tag, u["text"]]
+	body += "0  돌아간다     (수련 점수 %d)" % int(_meta.get("pts", 0))
+	_hud.show_card("훈련장", "영구 강화", body, "숫자 키로 고르세요")
+
+
+func _buy_upgrade(i: int) -> void:
+	if i < 0:
+		_to_hub()
+		return
+	if i >= Campaign.UPGRADES.size():
+		return
+	var u: Dictionary = Campaign.UPGRADES[i]
+	var lvl := int(_meta["up"].get(u["id"], 0))
+	var cost := Campaign.upgrade_cost(u, lvl)
+	if cost < 0 or cost > int(_meta.get("pts", 0)):
+		_hud.popup("점수가 모자랍니다" if cost > 0 else "이미 최고 단계", RED)
+		return
+	_meta["pts"] = int(_meta["pts"]) - cost
+	_meta["up"][u["id"]] = lvl + 1
+	_save_progress()
+	_hud.popup(u["name"] + " +1", GOLD)
+	_show_training()
+
+
+## Permanent effects bought in the training hall, as player mods.
+func _meta_mods() -> Dictionary:
+	var m := {}
+	for u in Campaign.UPGRADES:
+		var lvl := int(_meta["up"].get(u["id"], 0))
+		for k in u.get("mods", {}):
+			m[k] = float(m.get(k, 0.0)) + float(u["mods"][k]) * lvl
+	return m
+
+
+func _hub_talk() -> void:
+	_phase = Phase.HUB_TALK
+	var best := int(_meta.get("best_stage", 0))
+	var pool: Array = []
+	for t in Campaign.HUB_TALKS:
+		if best >= int(t["min"]) and (not t.has("flag") or int(_flags.get(t["flag"], 0)) == int(t["val"])):
+			pool.append(t)
+	var t: Dictionary = pool[randi() % pool.size()] if not pool.is_empty() else Campaign.HUB_TALKS[0]
+	_hud.show_card("기숙사 마당", t["who"], t["text"], "클릭하면 돌아갑니다")
+	_click_ready_at = Time.get_ticks_msec() + 300
+	_set_fps()
+
+
 # --- story: stages and cutscenes ------------------------------------------------------
 
 func _reset_campaign() -> void:
@@ -643,6 +784,8 @@ func _reset_campaign() -> void:
 	_boon_lvls = {}
 	_school = ""
 	_tries = {}
+	_seen = {}
+	_meta = {"pts": 0, "runs": 0, "best_stage": 0, "up": {}}
 	_save_progress()
 
 
@@ -660,6 +803,8 @@ func _begin_stage(i: int) -> void:
 
 ## Play the scenes one after another, then call `done`.
 func _run_scenes(ids: Array, done: Callable) -> void:
+	# A scene is shown the first time only (the endings always).
+	ids = ids.filter(func(sid): return sid.begins_with("end_") or not _seen.has(sid))
 	if ids.is_empty():
 		done.call()
 		return
@@ -680,6 +825,7 @@ func _run_scenes(ids: Array, done: Callable) -> void:
 	add_child(s)
 	s.finished.connect(func():
 		_title_cam.current = true
+		_seen[id] = true
 		_save_progress()
 		_run_scenes(ids, done))
 	s.play(Scenes.get_scene(id, _flags))
@@ -1022,6 +1168,8 @@ func _load_progress() -> void:
 		_boons = cfg.get_value("progress", "boons", [])
 		_boon_lvls = cfg.get_value("progress", "boon_lvls", {})
 		_school = String(cfg.get_value("progress", "school", ""))
+		_meta = cfg.get_value("progress", "meta", _meta)
+		_seen = cfg.get_value("progress", "seen", {})
 		for k in _prefs:
 			_prefs[k] = cfg.get_value("prefs", k, _prefs[k])
 		for bus in _volumes:
@@ -1039,6 +1187,8 @@ func _save_progress() -> void:
 	cfg.set_value("progress", "boons", _boons)
 	cfg.set_value("progress", "boon_lvls", _boon_lvls)
 	cfg.set_value("progress", "school", _school)
+	cfg.set_value("progress", "meta", _meta)
+	cfg.set_value("progress", "seen", _seen)
 	for k in _prefs:
 		cfg.set_value("prefs", k, _prefs[k])
 	for bus in _volumes:
@@ -1216,7 +1366,7 @@ func _make_rain() -> void:
 func _player_mods(stage: int) -> Dictionary:
 	var m := Boons.mods_of(_boons, _boon_lvls)
 	var school := Schools.mods_for(_school, Boons.count_school(_boons, _school))
-	for src in [school, Campaign.place_of(stage).get("mods", {})]:
+	for src in [school, Campaign.place_of(stage).get("mods", {}), _meta_mods()]:
 		for k in src:
 			m[k] = float(m.get(k, 0.0)) + float(src[k])
 	return m
